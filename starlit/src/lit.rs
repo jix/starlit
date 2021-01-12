@@ -129,6 +129,14 @@ pub struct Lit {
 }
 
 impl Lit {
+    /// The largest supported code of a literal.
+    ///
+    /// This is less than the backing integer type supports. This enables storing a literal code
+    /// and an additional bit or sentinel value in a single word.
+    ///
+    /// Equal to `2 * Var::MAX_INDEX + 1`.
+    pub const MAX_CODE: usize = 2 * Var::MAX_INDEX + 1;
+
     /// A literal for a given variable.
     ///
     /// A positive literal if the second parameter is `true`, a negative literal otherwise.
@@ -161,10 +169,10 @@ impl Lit {
 
     /// A literal with a given encoding.
     ///
-    /// Panics when the code is larger than `2 * Var::MAX_INDEX + 1`.
+    /// Panics when the code is larger than `Lit::MAX_CODE`.
     #[inline]
     pub fn from_code(code: usize) -> Lit {
-        assert!(code <= 2 * Var::MAX_INDEX + 1);
+        assert!(code <= Lit::MAX_CODE);
         Lit {
             code: code as LitIdx,
         }
@@ -172,14 +180,14 @@ impl Lit {
 
     /// A literal with a given encoding, without bounds checking.
     ///
-    /// Panics when the code is larger than `2 * Var::MAX_INDEX + 1`.
+    /// Panics when the code is larger than `Lit::MAX_CODE`.
     ///
     /// # Safety
     ///
-    /// The code must not be larger than `2 * Var::MAX_INDEX + 1`.
+    /// The code must not be larger than `Lit::MAX_CODE`.
     #[inline]
     pub unsafe fn from_code_unchecked(code: usize) -> Lit {
-        debug_assert!(code <= 2 * Var::MAX_INDEX + 1);
+        debug_assert!(code <= Lit::MAX_CODE);
         Lit {
             code: code as LitIdx,
         }
