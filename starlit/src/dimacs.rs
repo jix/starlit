@@ -2,10 +2,15 @@
 //!
 //! This includes DIMACS CNF files, extensions of that format as well as many other formats using
 //! similar conventions.
-use std::io::{self, BufReader, Cursor, Read};
+use std::{
+    fmt::Display,
+    io::{self, BufReader, Cursor, Read},
+};
 
 use bstr::BStr;
 use static_assertions::const_assert;
+
+pub mod cnf;
 
 /// A token of a DIMACS style file format.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -18,6 +23,30 @@ pub struct Token<'a> {
     pub value: i64,
     /// Line of the bytes following this token
     pub line: usize,
+}
+
+impl<'a> Display for Token<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            TokenKind::Comment => f.write_str("comment"),
+            TokenKind::Newline => f.write_str("end of line"),
+            TokenKind::Int => write!(f, "{}", self.bytes),
+            TokenKind::BigInt => write!(f, "{}", self.bytes),
+            TokenKind::Word => write!(f, "{:?}", self.bytes),
+            TokenKind::EndOfFile => f.write_str("end of file"),
+            TokenKind::IoError => f.write_str("io error"),
+        }
+    }
+}
+
+impl<'a> Token<'a> {
+    pub fn is_negative(&self) -> bool {
+        match self.kind {
+            TokenKind::Int => self.value < 0,
+            TokenKind::BigInt => self.bytes[0] == b'-',
+            _ => false,
+        }
+    }
 }
 
 // Changing the numeric values of the tokens requries adjusting code that uses them!
@@ -44,7 +73,7 @@ pub enum TokenKind {
     EndOfFile = 5,
     /// Token indicating an IO error occured.
     ///
-    /// The error can be accessed using [`DimacsTokenizer::check_io_error`].
+    /// The error can be accessed using [`Tokenizer::check_io_error`].
     IoError = 6,
 }
 
@@ -94,7 +123,7 @@ const BUF_ALLOC_SIZE: usize = BUF_SIZE + BUF_PADDING_END;
 const_assert!(BUF_SIZE <= u16::MAX as usize);
 
 /// Scan and tokenize a file in a DIMACS style format.
-pub struct DimacsTokenizer<'a> {
+pub struct Tokenizer<'a> {
     /// Source of input data.
     read: Box<dyn Read + 'a>,
     /// Tokenizing buffer.
@@ -121,8 +150,8 @@ pub struct DimacsTokenizer<'a> {
     advanced: bool,
 }
 
-impl<'a> DimacsTokenizer<'a> {
-    /// Initialize a [`DimacsTokenizer`] from a [`BufReader`].
+impl<'a> Tokenizer<'a> {
+    /// Initialize a [`Tokenizer`] from a [`BufReader`].
     pub fn from_buf_reader(buf_reader: BufReader<impl Read + 'a>) -> Self {
         // Avoid double buffering without discarding any already buffered contents.
         let buf_data = buf_reader.buffer().to_vec();
@@ -133,7 +162,7 @@ impl<'a> DimacsTokenizer<'a> {
         }
     }
 
-    /// Initialize a [`DimacsTokenizer`] with an underlying [`Read`] instance.
+    /// Initialize a [`Tokenizer`] with an underlying [`Read`] instance.
     ///
     /// If the [`Read`] instance is a [`BufReader`], it is better to use
     /// [`from_buf_reader`][Self::from_buf_reader] to avoid unnecessary copying of the read data.
@@ -141,13 +170,13 @@ impl<'a> DimacsTokenizer<'a> {
         Self::from_boxed_dyn_read(Box::new(read))
     }
 
-    /// Initialize a [`DimacsTokenizer`] with an underlying boxed [`Read`] instance.
+    /// Initialize a [`Tokenizer`] with an underlying boxed [`Read`] instance.
     ///
     /// If the [`Read`] instance is a [`BufReader`], it is better to use
     /// [`from_buf_reader`][Self::from_buf_reader] to avoid unnecessary copying of the read data.
     #[inline(never)]
     pub fn from_boxed_dyn_read(read: Box<dyn Read + 'a>) -> Self {
-        DimacsTokenizer {
+        Tokenizer {
             read,
             buf: Box::new([0; BUF_ALLOC_SIZE]),
             len: 0,
@@ -298,8 +327,8 @@ impl<'a> DimacsTokenizer<'a> {
     fn parse_token(token_bytes: &[u8]) -> (TokenKind, i64) {
         let digits = &token_bytes[(token_bytes[0] == b'-') as usize..];
 
-        if digits.iter().all(|digit| matches!(digit, b'0'..=b'9')) {
-            // Safety: we checked that `token_bytes` only consists of digits and the
+        if !digits.is_empty() && digits.iter().all(|digit| matches!(digit, b'0'..=b'9')) {
+            // SAFETY we checked that `token_bytes` only consists of digits and the
             // minus sign, so as pure ASCII it is also valid UTF-8.
             let token_str = unsafe { std::str::from_utf8_unchecked(token_bytes) };
             if let Ok(value) = str::parse::<i64>(token_str) {
