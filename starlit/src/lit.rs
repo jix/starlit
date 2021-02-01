@@ -128,6 +128,8 @@ pub struct Lit {
     code: LitIdx,
 }
 
+unsafe_impl_transparent!(Lit, LitIdx);
+
 impl Lit {
     /// The largest supported code of a literal.
     ///
