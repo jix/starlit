@@ -1,5 +1,5 @@
 //! Storage of long clauses.
-use std::mem::size_of;
+use std::{cmp::Ordering, hint::unreachable_unchecked, mem::size_of};
 
 use static_assertions::const_assert;
 
@@ -342,6 +342,106 @@ impl LongClauses {
             }
         }
     }
+
+    /// Reclaims memory used by deleted clauses.
+    ///
+    /// This invalidates all `ClauseRef` values, but also returns a mapping of previously valid
+    /// `ClauseRefs` to the new corresponding valid `ClauseRefs`.
+    pub fn collect_garbage(&mut self) -> ClauseRefGcMap {
+        let mut read = None;
+        let mut write_offset = 0;
+        let mut expected_read_offset = 0;
+
+        let mut gaps = vec![];
+
+        // For garbage collection we use a slightly modified `next_clause` iteration that reads one
+        // step ahead, so we can safely move the current clause without breaking the iteration.
+        self.next_clause(&mut read);
+        while let Some(clause) = read {
+            self.next_clause(&mut read); // we are free to move `clause` below here
+            let storage_size = self.clause_len(clause) + ClauseHeader::WORDS;
+            let read_offset = clause.id as usize;
+            if read_offset != expected_read_offset {
+                gaps.push(GcMapGap {
+                    start: expected_read_offset as LitIdx,
+                    end: read_offset as LitIdx,
+                    shift: (read_offset - write_offset) as LitIdx,
+                });
+            }
+            expected_read_offset = read_offset + storage_size;
+            self.buffer
+                .copy_within(read_offset..read_offset + storage_size, write_offset);
+            write_offset += storage_size;
+        }
+
+        self.buffer.truncate(write_offset);
+
+        ClauseRefGcMap { gaps }
+    }
+}
+
+/// Used to update [`ClauseRef`] values after [`LongClauses::collect_garbage`].
+///
+/// A garbage collection invaldiates all [`ClauseRef`] values, but this map can be used to update
+/// them so they become valid again.
+pub struct ClauseRefGcMap {
+    gaps: Vec<GcMapGap>,
+}
+
+impl ClauseRefGcMap {
+    /// Update a pre-collection to a post-collection [`ClauseRef`].
+    ///
+    /// For a valid-pre-collection non-deleted clause reference a corresponding
+    /// valid-post-collection clause reference is returned. For a valid-pre-collection deleted
+    /// clause reference this returns `None`. If the given clause reference was not valid
+    /// pre-collection, the result is an unspecified, possibly invalid clause reference, but calling
+    /// this is still safe and will not panic.
+    pub fn update(&self, clause: ClauseRef) -> Option<ClauseRef> {
+        // Find the gap containing or directly preceeding `clause`. This considers `gap.start` to
+        // point between words and `clause.id` to point at a word, to avoid the `Ordering::Equal`
+        // case.
+        if let Err(index) = self.gaps.binary_search_by(|gap| {
+            if gap.start > clause.id {
+                Ordering::Greater
+            } else {
+                Ordering::Less
+            }
+        }) {
+            // The index returned by binary_search is an ordered insertion index, so it is one
+            // larger than the index of the found gap. If it is zero there is no preceeding gap.
+            if let Some(gap) = self.gaps.get(index.wrapping_sub(1)) {
+                debug_assert!(gap.start <= clause.id);
+                if gap.end > clause.id {
+                    None
+                } else {
+                    Some(ClauseRef {
+                        id: clause.id - gap.shift,
+                    })
+                }
+            } else {
+                // No preceeding gap means the clause did not move during collection
+                Some(clause)
+            }
+        } else {
+            unsafe {
+                // SAFETY our binary_search_by callback never returns `Ordering::Equal`
+                unreachable_unchecked();
+            }
+        }
+    }
+}
+
+/// Range of reclaimed storage during garbage collection.
+///
+/// Used in [`ClauseRefGcMap`].
+struct GcMapGap {
+    /// Start of a removed range of (pre-collection) [`ClauseRef`] ids.
+    start: LitIdx,
+    /// End of a removed range of (pre-collection) [`ClauseRef`] ids.
+    end: LitIdx,
+    /// Value to subtract from pre-collection ids to get post-collection ids for clauses between
+    /// this gap and the following gap.
+    shift: LitIdx,
 }
 
 #[cfg(test)]
@@ -455,5 +555,89 @@ mod tests {
             assert_eq!(expected_lits, long_clauses.lits_mut(clause_ref));
         }
         assert_eq!(expected.next(), None);
+    }
+
+    #[test]
+    fn collect_deleted_clauses() {
+        let mut input_clauses = vec![
+            clause![8, 9, 10, 11, 12, 13, 14, 15],
+            clause![1, 2, 3],
+            clause![4, 5, 6, 7],
+            clause![21, 22, 23],
+            clause![16, 17, 18, 19, 20],
+            clause![24, 25, 26],
+        ];
+        let delete_indices = &[2, 0, 3];
+        let mut long_clauses = LongClauses::default();
+
+        let mut clause_refs = vec![];
+
+        for clause_lits in &input_clauses {
+            clause_refs.push(long_clauses.add_clause(clause_lits));
+        }
+
+        for &index in delete_indices {
+            long_clauses.delete_clause(clause_refs[index]);
+            input_clauses[index].clear();
+        }
+
+        let gc_map = long_clauses.collect_garbage();
+
+        let mut current_clause = None;
+        let mut expected = input_clauses
+            .iter()
+            .zip(&clause_refs)
+            .filter(|(clause, _)| !clause.is_empty());
+        while let Some(clause_ref) = long_clauses.next_clause(&mut current_clause) {
+            let (expected_lits, &expected_clause_ref) = expected.next().unwrap();
+            assert_eq!(clause_ref, gc_map.update(expected_clause_ref).unwrap());
+            assert_eq!(expected_lits, long_clauses.lits(clause_ref));
+            assert_eq!(expected_lits, long_clauses.lits_mut(clause_ref));
+        }
+        assert_eq!(expected.next(), None);
+
+        for (clause, &clause_ref) in input_clauses.iter().zip(&clause_refs) {
+            if clause.is_empty() {
+                assert_eq!(gc_map.update(clause_ref), None);
+            }
+        }
+    }
+
+    #[test]
+    fn clause_ref_gc_map() {
+        #[rustfmt::skip]
+        let map = ClauseRefGcMap {
+            gaps: vec![
+                GcMapGap { start: 5, end: 10, shift: 5 },
+                GcMapGap { start: 15, end: 20, shift: 10 },
+            ],
+        };
+
+        assert_eq!(map.update(ClauseRef { id: 0 }), Some(ClauseRef { id: 0 }));
+        assert_eq!(map.update(ClauseRef { id: 4 }), Some(ClauseRef { id: 4 }));
+        assert_eq!(map.update(ClauseRef { id: 5 }), None);
+        assert_eq!(map.update(ClauseRef { id: 9 }), None);
+        assert_eq!(map.update(ClauseRef { id: 10 }), Some(ClauseRef { id: 5 }));
+        assert_eq!(map.update(ClauseRef { id: 14 }), Some(ClauseRef { id: 9 }));
+        assert_eq!(map.update(ClauseRef { id: 15 }), None);
+        assert_eq!(map.update(ClauseRef { id: 19 }), None);
+        assert_eq!(map.update(ClauseRef { id: 20 }), Some(ClauseRef { id: 10 }));
+        assert_eq!(
+            map.update(ClauseRef { id: LitIdx::MAX }),
+            Some(ClauseRef {
+                id: LitIdx::MAX - 10
+            })
+        );
+
+        #[rustfmt::skip]
+        let map = ClauseRefGcMap {
+            gaps: vec![
+                GcMapGap { start: 0, end: 5, shift: 5 },
+                GcMapGap { start: 15, end: 20, shift: 10 },
+            ],
+        };
+        assert_eq!(map.update(ClauseRef { id: 0 }), None);
+        assert_eq!(map.update(ClauseRef { id: 4 }), None);
+        assert_eq!(map.update(ClauseRef { id: 5 }), Some(ClauseRef { id: 0 }));
     }
 }
