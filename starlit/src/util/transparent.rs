@@ -9,6 +9,7 @@ pub unsafe trait Transparent: Sized + AsStorage {}
 
 /// Conversion of [`Transparent`] types to their underlying storage.
 pub trait AsStorage {
+    /// The underlying storage type.
     type Storage: Sized;
 
     /// Converts this value to the underlying storage type.
@@ -24,6 +25,7 @@ pub trait AsStorage {
 
 /// Conversion of [`Transparent`] types to their underlying storage.
 pub trait AsStorageMut {
+    /// The underlying storage type.
     type StorageMut: Sized;
 
     /// Converts this value to the underlying storage type, allowing mutable access.

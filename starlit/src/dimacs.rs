@@ -40,6 +40,7 @@ impl<'a> Display for Token<'a> {
 }
 
 impl<'a> Token<'a> {
+    /// Returns `true` when the token is of kind `Int` or `BigInt` and represents a negative number.
     pub fn is_negative(&self) -> bool {
         match self.kind {
             TokenKind::Int => self.value < 0,
@@ -78,11 +79,13 @@ pub enum TokenKind {
 }
 
 impl TokenKind {
+    /// Returns `true` for token kinds `Newline` or `Comment`.
     #[inline(always)]
     pub fn terminates_line(self) -> bool {
         self as u8 <= TokenKind::Newline as u8
     }
 
+    /// Returns `true` for token kinds `EndOfFile` or `IoError`.
     #[inline(always)]
     pub fn last(self) -> bool {
         self as u8 >= TokenKind::EndOfFile as u8

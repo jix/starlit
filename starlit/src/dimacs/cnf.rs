@@ -12,7 +12,12 @@ use super::{TokenKind, Tokenizer};
 pub enum ParseError {
     /// Error while parsing an input line.
     #[error("{line}: {message}")]
-    ParseError { line: usize, message: String },
+    ParseError {
+        /// Line number where an error was encountered.
+        line: usize,
+        /// Description of the encountered error
+        message: String,
+    },
     /// IO error while reading the input file.
     #[error(transparent)]
     IoError(#[from] std::io::Error),
