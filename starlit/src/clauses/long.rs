@@ -290,7 +290,7 @@ impl LongClauses {
     ///
     /// This allows iteration using the following pattern:
     /// ```rust
-    /// # use starlit::long_clauses::LongClauses;
+    /// # use starlit::clauses::long::LongClauses;
     /// let mut long_clauses = LongClauses::default();
     /// // ...
     /// let mut clause_iter = None;
@@ -321,6 +321,9 @@ impl LongClauses {
                 .buffer
                 .get_unchecked_mut(clause.id as usize + ClauseHeader::LEN_OFFSET) =
                 LIT_IDX_MSB | (new_len as LitIdx);
+
+            // The search_pos might now point past the last element of the clause, so we reset it.
+            self.data_unchecked_mut(clause).search_pos = 0;
         }
     }
 
