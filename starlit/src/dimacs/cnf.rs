@@ -27,7 +27,7 @@ pub enum ParseError {
 ///
 /// Contains the number of variables and clauses. This parser also supports partial headers that
 /// omit either the clause count or both fields.
-#[derive(Default)]
+#[derive(Copy, Clone, Default, Debug)]
 pub struct Header {
     /// Upper bound on the number of variables present in the formula.
     pub var_count: Option<usize>,
@@ -40,7 +40,7 @@ pub struct Parser<'a> {
     tokenizer: Tokenizer<'a>,
     header: Option<Header>,
     parsed_clauses: usize,
-    max_claus_count: usize,
+    max_clause_count: usize,
     max_var_count: i64,
     clause: Vec<Lit>,
 }
@@ -63,7 +63,7 @@ impl<'a> Parser<'a> {
             tokenizer,
             header: None,
             parsed_clauses: 0,
-            max_claus_count: usize::MAX,
+            max_clause_count: usize::MAX,
             max_var_count: Var::MAX_DIMACS as i64,
             clause: vec![],
         }
@@ -155,33 +155,54 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parse and return the header of a DIMACS CNF file.
+    ///
+    /// This caches the result and can be called at any point during parsing.
+    pub fn header(&mut self) -> Result<Option<Header>, ParseError> {
+        if self.header.is_none() {
+            loop {
+                let token = self.tokenizer.current_token();
+                match token.kind {
+                    TokenKind::Comment | TokenKind::Newline => self.tokenizer.advance(),
+                    TokenKind::Word
+                        if token.bytes == "p"
+                            && self.clause.is_empty()
+                            && self.parsed_clauses == 0
+                            && self.header.is_none() =>
+                    {
+                        self.tokenizer.advance();
+                        let header = self.parse_header()?;
+
+                        if let Some(var_count) = header.var_count {
+                            self.max_var_count = var_count as i64;
+                        }
+                        if let Some(clause_count) = header.clause_count {
+                            self.max_clause_count = clause_count;
+                        }
+                        self.header = Some(header);
+                    }
+                    _ => break,
+                }
+            }
+        }
+
+        Ok(self.header)
+    }
+
     /// Parse and return the next clause.
     ///
     /// Returns `Ok<None>` on end of file.
     pub fn next_clause(&mut self) -> Result<Option<&[Lit]>, ParseError> {
         self.clause.clear();
 
+        if self.parsed_clauses == 0 {
+            self.header()?;
+        }
+
         loop {
             let mut token = self.tokenizer.current_token();
             match token.kind {
                 TokenKind::Comment | TokenKind::Newline => self.tokenizer.advance(),
-                TokenKind::Word
-                    if token.bytes == "p"
-                        && self.clause.is_empty()
-                        && self.parsed_clauses == 0
-                        && self.header.is_none() =>
-                {
-                    self.tokenizer.advance();
-                    let header = self.parse_header()?;
-
-                    if let Some(var_count) = header.var_count {
-                        self.max_var_count = var_count as i64;
-                    }
-                    if let Some(clause_count) = header.clause_count {
-                        self.max_claus_count = clause_count;
-                    }
-                    self.header = Some(header);
-                }
                 TokenKind::EndOfFile if self.clause.is_empty() => {
                     if let Some(header) = &self.header {
                         if let Some(clause_count) = header.clause_count {
@@ -203,7 +224,7 @@ impl<'a> Parser<'a> {
                         parse_error!(self, token, "unexpected {}, expected end of line", token);
                     }
                     self.parsed_clauses += 1;
-                    if self.parsed_clauses > self.max_claus_count {
+                    if self.parsed_clauses > self.max_clause_count {
                         parse_error!(self, token, "unexpected clause, expected end of file");
                     }
                     self.tokenizer.advance();
