@@ -1,5 +1,5 @@
 //! Storage of long clauses.
-use std::{cmp::Ordering, hint::unreachable_unchecked, mem::size_of};
+use std::{cmp::Ordering, hint::unreachable_unchecked, mem::size_of, slice};
 
 use static_assertions::const_assert;
 
@@ -36,6 +36,9 @@ pub struct ClauseData {
 impl ClauseData {
     /// Returns the circular scanning position used durig propagation.
     ///
+    /// Note that this starts counting with position 0 for the 3rd literal, i.e. skipping the
+    /// watched literals.
+    ///
     /// See also ["Optimal Implementation of Watched Literals and More General
     /// Techniques"](https://doi.org/10.1613/jair.4016)
     pub fn search_pos(&self) -> usize {
@@ -43,6 +46,9 @@ impl ClauseData {
     }
 
     /// Updates the circular scanning position used durig propagation.
+    ///
+    /// Note that this starts counting with position 0 for the 3rd literal, i.e. skipping the
+    /// watched literals.
     pub fn set_search_pos(&mut self, search_pos: usize) {
         // SAFETY masking out the MSB maintains a safety invariant
         self.search_pos = (search_pos as LitIdx) & !LIT_IDX_MSB
@@ -73,7 +79,7 @@ impl ClauseHeader {
         ClauseHeader {
             data: ClauseData {
                 data: 0,
-                search_pos: 2,
+                search_pos: 0,
             },
             len_with_marker: (len as LitIdx) | LIT_IDX_MSB,
         }
@@ -258,6 +264,76 @@ impl LongClauses {
             // SAFETY `clause_len` panics if `clause` is invalid
             self.data_unchecked_mut(clause)
         }
+    }
+
+    /// Returns a reference to the literals and associated data of a clause without validity or
+    /// bounds checking.
+    ///
+    /// For a valid reference to a deleted clause (which will be invalidated during the next garbage
+    /// collection), this returns an empty slice for the literals.
+    ///
+    /// # Safety
+    /// Here `clause` needs to be valid and `len` needs to be the actualy length of the
+    /// corresponding clause.
+    pub unsafe fn data_and_lits_unchecked_with_len(
+        &self,
+        clause: ClauseRef,
+        len: usize,
+    ) -> (&ClauseData, &[Lit]) {
+        debug_assert_eq!(self.clause_len(clause), len);
+        let ptr = self.buffer.as_ptr().add(clause.id as usize);
+        let header = <&ClauseHeader>::from_storage_unchecked(
+            &*(ptr as *const [LitIdx; ClauseHeader::WORDS]),
+        );
+        let lits = <&[Lit]>::from_storage_unchecked(slice::from_raw_parts(
+            ptr.add(ClauseHeader::WORDS),
+            len,
+        ));
+        (&header.data, lits)
+    }
+
+    /// Returns a mutable reference to the literals and associated data of a clause without validity
+    /// or bounds checking.
+    ///
+    /// For a valid reference to a deleted clause (which will be invalidated during the next garbage
+    /// collection), this returns an empty slice  for the literals.
+    ///
+    /// # Safety
+    /// Here `clause` needs to be valid and `len` needs to be the actualy length of the
+    /// corresponding clause.
+    pub unsafe fn data_and_lits_unchecked_with_len_mut(
+        &mut self,
+        clause: ClauseRef,
+        len: usize,
+    ) -> (&mut ClauseData, &mut [Lit]) {
+        debug_assert_eq!(self.clause_len(clause), len);
+        let ptr = self.buffer.as_mut_ptr().add(clause.id as usize);
+        let header = <&mut ClauseHeader>::from_storage_unchecked_mut(
+            &mut *(ptr as *mut [LitIdx; ClauseHeader::WORDS]),
+        );
+        let lits = <&mut [Lit]>::from_storage_unchecked_mut(slice::from_raw_parts_mut(
+            ptr.add(ClauseHeader::WORDS),
+            len,
+        ));
+        (&mut header.data, lits)
+    }
+
+    /// Returns a reference to the literals and associated data of a clause.
+    ///
+    /// Panics if the clause reference is invalid. For a valid reference to a deleted clause (which
+    /// will be invalidated during the next garbage collection), this returns an empty slice.
+    pub fn data_and_lits(&self, clause: ClauseRef) -> (&ClauseData, &[Lit]) {
+        // SAFETY clause_len panics when `clause` is invalid
+        unsafe { self.data_and_lits_unchecked_with_len(clause, self.clause_len(clause)) }
+    }
+
+    /// Returns a mutable reference to the literals and associated data of a clause.
+    ///
+    /// Panics if the clause reference is invalid. For a valid reference to a deleted clause (which
+    /// will be invalidated during the next garbage collection), this returns an empty slice.
+    pub fn data_and_lits_mut(&mut self, clause: ClauseRef) -> (&mut ClauseData, &mut [Lit]) {
+        // SAFETY clause_len panics when `clause` is invalid
+        unsafe { self.data_and_lits_unchecked_with_len_mut(clause, self.clause_len(clause)) }
     }
 
     /// Returns a [`ClauseRef`] to the next clause stored after `start` if such a clause exists.
@@ -479,6 +555,8 @@ mod tests {
             assert_eq!(clause_ref, expected_clause_ref);
             assert_eq!(expected_lits, long_clauses.lits(clause_ref));
             assert_eq!(expected_lits, long_clauses.lits_mut(clause_ref));
+            assert_eq!(expected_lits, long_clauses.data_and_lits(clause_ref).1);
+            assert_eq!(expected_lits, long_clauses.data_and_lits_mut(clause_ref).1);
         }
         assert_eq!(expected.next(), None);
     }
