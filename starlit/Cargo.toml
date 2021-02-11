@@ -10,6 +10,7 @@ edition = "2018"
 bstr = "0.2.14"
 static_assertions = "1.1.0"
 thiserror = "1.0.23"
+vec_mut_scan = "0.4.0"
 
 [dev-dependencies]
 anyhow = "1.0.38"

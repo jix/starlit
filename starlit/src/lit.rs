@@ -1,9 +1,12 @@
 //! Literals and variables.
 
-use std::fmt;
+use std::{fmt, ops};
 
 /// The backing type used to represent literals and variables.
 pub type LitIdx = u32;
+
+/// Signed integer with the same size and alignment of `LitIdx`.
+pub type SignedLitIdx = i32;
 
 /// A Boolean variable.
 ///
@@ -239,6 +242,28 @@ impl Lit {
     #[inline]
     pub fn dimacs(self) -> isize {
         self.var().dimacs() as isize * if self.is_positive() { 1 } else { -1 }
+    }
+
+    /// Given two literals, one equal to this literal, returns the other.
+    ///
+    /// Returns an arbitrary literal or panics if none of the given literals are equal to this
+    /// literal.
+    #[inline]
+    pub fn select_other(self, a: Lit, b: Lit) -> Lit {
+        debug_assert!(self == a || self == b, "{:?} not in {:?} {:?}", self, a, b);
+        Lit {
+            code: self.code ^ a.code ^ b.code,
+        }
+    }
+}
+
+impl ops::Not for Lit {
+    type Output = Lit;
+
+    fn not(self) -> Self::Output {
+        Lit {
+            code: self.code ^ 1,
+        }
     }
 }
 
