@@ -459,7 +459,7 @@ mod tests {
     }
 
     #[test]
-    fn err_exceeding_max_var_count() -> Result<()> {
+    fn err_exceeding_max_var_count() {
         let input = format!("p cnf {}\n", Var::MAX_VAR_COUNT + 1);
         let mut parser = Parser::from_read(input.as_bytes());
 
@@ -467,22 +467,20 @@ mod tests {
             parser.next_clause(),
             Err(ParseError::ParseError { line: 1, .. })
         ));
-        Ok(())
     }
 
     #[test]
-    fn err_negative_var_count() -> Result<()> {
+    fn err_negative_var_count() {
         let mut parser = Parser::from_read("p cnf -1".as_bytes());
 
         assert!(matches!(
             parser.next_clause(),
             Err(ParseError::ParseError { line: 1, .. })
         ));
-        Ok(())
     }
 
     #[test]
-    fn err_exceeding_max_clause_count() -> Result<()> {
+    fn err_exceeding_max_clause_count() {
         let input = format!("p cnf 1 {}\n", (i64::MAX as u64) + 1);
         let mut parser = Parser::from_read(input.as_bytes());
 
@@ -490,29 +488,26 @@ mod tests {
             parser.next_clause(),
             Err(ParseError::ParseError { line: 1, .. })
         ));
-        Ok(())
     }
 
     #[test]
-    fn err_wrong_header() -> Result<()> {
+    fn err_wrong_header() {
         let mut parser = Parser::from_read("p notcnf\n".as_bytes());
 
         assert!(matches!(
             parser.next_clause(),
             Err(ParseError::ParseError { line: 1, .. })
         ));
-        Ok(())
     }
 
     #[test]
-    fn err_wrong_header_line2() -> Result<()> {
+    fn err_wrong_header_line2() {
         let mut parser = Parser::from_read("\np\n".as_bytes());
 
         assert!(matches!(
             parser.next_clause(),
             Err(ParseError::ParseError { line: 2, .. })
         ));
-        Ok(())
     }
 
     #[test]
@@ -589,46 +584,42 @@ mod tests {
     }
 
     #[test]
-    fn err_unexpected_token_var_count() -> Result<()> {
+    fn err_unexpected_token_var_count() {
         let mut parser = Parser::from_read("p cnf error 2\n".as_bytes());
 
         assert_matches!(
             parser.next_clause(),
             Err(ParseError::ParseError { line: 1, .. })
         );
-        Ok(())
     }
 
     #[test]
-    fn err_unexpected_token_clause_count() -> Result<()> {
+    fn err_unexpected_token_clause_count() {
         let mut parser = Parser::from_read("p cnf 2 error\n".as_bytes());
 
         assert_matches!(
             parser.next_clause(),
             Err(ParseError::ParseError { line: 1, .. })
         );
-        Ok(())
     }
 
     #[test]
-    fn err_extra_header_field() -> Result<()> {
+    fn err_extra_header_field() {
         let mut parser = Parser::from_read("p cnf 2 1 2\n".as_bytes());
 
         assert_matches!(
             parser.next_clause(),
             Err(ParseError::ParseError { line: 1, .. })
         );
-        Ok(())
     }
 
     #[test]
-    fn err_unexpected_token_clause() -> Result<()> {
+    fn err_unexpected_token_clause() {
         let mut parser = Parser::from_read("p cnf 2 1\n 1 2 err 0\n".as_bytes());
 
         assert_matches!(
             parser.next_clause(),
             Err(ParseError::ParseError { line: 2, .. })
         );
-        Ok(())
     }
 }
