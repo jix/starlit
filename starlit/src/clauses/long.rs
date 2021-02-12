@@ -5,7 +5,7 @@ use static_assertions::const_assert;
 
 use crate::{
     lit::{Lit, LitIdx, Var},
-    util::transparent::{AsStorage, AsStorageMut},
+    util::transparent::{ConvertStorage, ConvertStorageMut},
 };
 
 /// The backing type used to represent clause references.
@@ -125,8 +125,8 @@ impl LongClauses {
         // TODO eventually this check should not panic
         assert!(id <= ClauseRefId::MAX as usize);
         let header = ClauseHeader::new(clause_lits.len());
-        self.buffer.extend_from_slice(&header.as_storage());
-        self.buffer.extend_from_slice(clause_lits.as_storage());
+        self.buffer.extend_from_slice(&header.into_storage());
+        self.buffer.extend_from_slice(clause_lits.into_storage());
         ClauseRef { id: id as _ }
     }
 

@@ -5,15 +5,15 @@
 /// # Safety
 /// Every value of a type implementing this must also be a valid value for the storage type. The
 /// converse does not have to hold.
-pub unsafe trait Transparent: Sized + AsStorage {}
+pub unsafe trait Transparent: Sized + ConvertStorage {}
 
 /// Conversion of [`Transparent`] types to their underlying storage.
-pub trait AsStorage {
+pub trait ConvertStorage {
     /// The underlying storage type.
     type Storage: Sized;
 
     /// Converts this value to the underlying storage type.
-    fn as_storage(self) -> Self::Storage;
+    fn into_storage(self) -> Self::Storage;
 
     /// Converts a value of the underlying storage type to a value of the implementing type.
     ///
@@ -24,7 +24,7 @@ pub trait AsStorage {
 }
 
 /// Conversion of [`Transparent`] types to their underlying storage.
-pub trait AsStorageMut {
+pub trait ConvertStorageMut {
     /// The underlying storage type.
     type StorageMut: Sized;
 
@@ -33,7 +33,7 @@ pub trait AsStorageMut {
     /// # Safety
     /// The caller has to ensure that any performed mutations maintain any extra invariants imposed
     /// by the implementing type. See the documentation of the implementing type for details.
-    unsafe fn as_storage_mut(self) -> Self::StorageMut;
+    unsafe fn into_storage_mut(self) -> Self::StorageMut;
 
     /// Converts a value of the underlying storage type to a value of the implementing type.
     ///
@@ -47,11 +47,11 @@ macro_rules! unsafe_impl_transparent {
     ($T:ty, $S:ty) => {
         unsafe impl $crate::util::transparent::Transparent for $T {}
 
-        impl $crate::util::transparent::AsStorage for $T {
+        impl $crate::util::transparent::ConvertStorage for $T {
             type Storage = $S;
 
             #[inline(always)]
-            fn as_storage(self) -> Self::Storage {
+            fn into_storage(self) -> Self::Storage {
                 unsafe { ::std::mem::transmute(self) }
             }
 
@@ -66,11 +66,11 @@ macro_rules! unsafe_impl_transparent {
     };
 }
 
-impl<'a, T: Transparent> AsStorage for &'a T {
+impl<'a, T: Transparent> ConvertStorage for &'a T {
     type Storage = &'a T::Storage;
 
     #[inline(always)]
-    fn as_storage(self) -> Self::Storage {
+    fn into_storage(self) -> Self::Storage {
         // SAFETY by documented invariant of types implementing `Transparent`
         unsafe { &*(self as *const _ as *const _) }
     }
@@ -81,11 +81,11 @@ impl<'a, T: Transparent> AsStorage for &'a T {
     }
 }
 
-impl<'a, T: Transparent> AsStorage for &'a [T] {
+impl<'a, T: Transparent> ConvertStorage for &'a [T] {
     type Storage = &'a [T::Storage];
 
     #[inline(always)]
-    fn as_storage(self) -> Self::Storage {
+    fn into_storage(self) -> Self::Storage {
         // SAFETY by documented invariant of types implementing `Transparent`
         unsafe { &*(self as *const _ as *const _) }
     }
@@ -96,11 +96,11 @@ impl<'a, T: Transparent> AsStorage for &'a [T] {
     }
 }
 
-impl<'a, T: Transparent> AsStorageMut for &'a mut T {
+impl<'a, T: Transparent> ConvertStorageMut for &'a mut T {
     type StorageMut = &'a mut T::Storage;
 
     #[inline(always)]
-    unsafe fn as_storage_mut(self) -> Self::StorageMut {
+    unsafe fn into_storage_mut(self) -> Self::StorageMut {
         &mut *(self as *mut _ as *mut _)
     }
 
@@ -110,11 +110,11 @@ impl<'a, T: Transparent> AsStorageMut for &'a mut T {
     }
 }
 
-impl<'a, T: Transparent> AsStorageMut for &'a mut [T] {
+impl<'a, T: Transparent> ConvertStorageMut for &'a mut [T] {
     type StorageMut = &'a mut [T::Storage];
 
     #[inline(always)]
-    unsafe fn as_storage_mut(self) -> Self::StorageMut {
+    unsafe fn into_storage_mut(self) -> Self::StorageMut {
         &mut *(self as *mut _ as *mut _)
     }
 
