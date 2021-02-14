@@ -27,14 +27,20 @@ pub struct Step {
     /// The assigned literal.
     pub assigned_lit: Lit,
     /// The decision level of this step.
+    ///
+    /// The decision level of the `n`-th decision literal is `n`. For a propagated literal the
+    /// decision level is the maximum decision level among the falsified literals in the propagating
+    /// clause or zero if there are none.
     pub decision_level: LitIdx,
-    /// The reason that caused this step, represents the implication graph.
+    /// The propagating clause that assigned this literal.
+    ///
+    /// Used to represent the implication graph.
     pub reason: Reason,
 }
 
 /// Stores a history of steps performed during the search to enable backtracking.
 ///
-/// This also contains the resulting variable assignment.
+/// This also contains the resulting variable assignment as well as the implication graph.
 #[derive(Default)]
 pub struct Trail {
     /// The state after performing all steps currently on the trail.

@@ -1,14 +1,9 @@
 //! Unit propagation for CNF clauses.
 //!
 //! This implements watch list based unit propagation for CNF clauses. Unit propagation is the
-//! process of repeatedly extending the current partial assignment by all asserted literals until
-//! none are left or until a clause is in conflict.
-//!
-//! We say a clause is _unit_ when removing all literals that are false in the current assignment
-//! yields a unit clause. A clause is _falsified_ or in _conflict_ when all its literals are
-//! falsified. If a clause is unit and the remaining literal is not assigned yet, that clause is
-//! called _asserting_, as we can infer that any satisfying assignment extending the current
-//! assignment must set the remaining literal, i.e. the _asserted_ literal, to true.
+//! process of repeatedly extending the current partial assignment by all literals propagated by
+//! clauses that are unit under the current assignment until none are left or until a clause is in
+//! conflict.
 use vec_mut_scan::VecMutScan;
 
 use crate::{
@@ -43,14 +38,14 @@ impl<'a> UnitProp<'a> {
         Ok(())
     }
 
-    /// Finds clauses that become asserting or falsified when `lit` is assigned true.
+    /// Finds clauses that become unit or falsified when `lit` is assigned true.
     fn propagate_literal(&mut self, lit: Lit) -> Result<(), ConflictClause> {
         self.propagate_binary_clauses(lit)?;
         self.propagate_long_clauses(lit)?;
         Ok(())
     }
 
-    /// Finds binary clauses that become asserting or falsified when `lit` is assigned true.
+    /// Finds binary clauses that become unit or falsified when `lit` is assigned true.
     fn propagate_binary_clauses(&mut self, lit: Lit) -> Result<(), ConflictClause> {
         // `lit` is assigned `true`, so clauses containing `!lit` could become unit or falsified.
         let clause_lit = !lit;
@@ -62,7 +57,8 @@ impl<'a> UnitProp<'a> {
                 if self.trail.assigned.is_false(other_lit) {
                     return Err(ConflictClause::Binary([clause_lit, other_lit]));
                 } else {
-                    // Otherwise the clause is unit and will assert its other literal
+                    // Otherwise the clause is unit and non-satisfied, so we propagate its other
+                    // literal
                     self.trail.assign(Step {
                         assigned_lit: other_lit,
                         decision_level: self.trail.current_decision_level,
@@ -75,7 +71,7 @@ impl<'a> UnitProp<'a> {
         Ok(())
     }
 
-    /// Finds long clauses that become asserting or falsified when `lit` is assigned true.
+    /// Finds long clauses that become unit or falsified when `lit` is assigned true.
     fn propagate_long_clauses(&mut self, lit: Lit) -> Result<(), ConflictClause> {
         // `lit` is assigned `true`, so clauses containing `!lit` could become unit or falsified.
         let watched_lit = !lit;
