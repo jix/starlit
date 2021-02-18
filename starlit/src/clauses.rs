@@ -20,18 +20,30 @@ pub struct Clauses {
     pub watch_lists: WatchLists,
 }
 
+/// Reference to an added binary or long clause.
+pub enum AddedClause {
+    /// A reference to a binary clause, represented as the two contained literals.
+    ///
+    /// The order is the same as in the literals passed to [`Clauses::add_clause`].
+    Binary([Lit; 2]),
+    /// A reference to a long clause.
+    Long(ClauseRef),
+}
+
 impl Clauses {
     /// Stores a new clause, returning a `ClauseRef` to the new clause if it is long.
-    pub fn add_clause(&mut self, clause_lits: &[Lit]) -> Option<ClauseRef> {
+    ///
+    /// Returns a reference to the added clause.
+    pub fn add_clause(&mut self, clause_lits: &[Lit]) -> AddedClause {
         match *clause_lits {
             [a, b] => {
                 self.binary.add_clause([a, b]);
-                None
+                AddedClause::Binary([a, b])
             }
             [a, b, ..] => {
                 let clause = self.long.add_clause(clause_lits);
                 self.watch_lists.watch_clause(clause, [a, b]);
-                Some(clause)
+                AddedClause::Long(clause)
             }
             _ => panic!(
                 "cannot add unit or empty clause {:?} to Clauses",

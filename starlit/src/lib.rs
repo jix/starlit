@@ -7,6 +7,7 @@
 pub mod util;
 
 pub mod clauses;
+pub mod conflict_analysis;
 pub mod dimacs;
 pub mod lit;
 pub mod tracking;

@@ -7,20 +7,13 @@
 use vec_mut_scan::VecMutScan;
 
 use crate::{
-    clauses::{long::ClauseRef, Clauses},
+    clauses::Clauses,
+    conflict_analysis::ConflictClause,
     lit::Lit,
     trail::{Reason, Step, Trail},
 };
 
-/// Reference to a falsified clause.
-pub enum ConflictClause {
-    /// The falsified clause is a binary clause.
-    Binary([Lit; 2]),
-    /// The falsified clause is a long clause.
-    Long(ClauseRef),
-}
-
-/// Data used during unit propagation.
+/// References to all data used during unit propagation.
 pub struct UnitProp<'a> {
     /// Trail and resulting partial assignment.
     pub trail: &'a mut Trail,
@@ -61,7 +54,7 @@ impl<'a> UnitProp<'a> {
                     // literal
                     self.trail.assign(Step {
                         assigned_lit: other_lit,
-                        decision_level: self.trail.current_decision_level,
+                        decision_level: self.trail.decision_level(),
                         reason: Reason::Binary(clause_lit),
                     })
                 }
@@ -181,9 +174,15 @@ impl<'a> UnitProp<'a> {
                 break;
             } else {
                 // This clause asserts `other_watched_lit`.
+
+                // Make sure the asserted literal is the first, so the asserting literals form a
+                // contiguous slice.
+                clause_lits[0] = other_watched_lit;
+                clause_lits[1] = watched_lit;
+
                 self.trail.assign(Step {
                     assigned_lit: other_watched_lit,
-                    decision_level: self.trail.current_decision_level,
+                    decision_level: self.trail.decision_level(),
                     reason: Reason::Long(watch.clause),
                 })
             }
