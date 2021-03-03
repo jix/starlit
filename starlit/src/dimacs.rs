@@ -155,7 +155,7 @@ pub struct Tokenizer<'a> {
 }
 
 impl<'a> Tokenizer<'a> {
-    /// Initialize a [`Tokenizer`] from a [`BufReader`].
+    /// Initializes a [`Tokenizer`] from a [`BufReader`].
     ///
     /// Note that this will immediately fill the tokenizer internal buffer. IO errors encountered
     /// during that will be reported when iterating over the tokens.
@@ -169,7 +169,7 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    /// Initialize a [`Tokenizer`] with an underlying [`Read`] instance.
+    /// Initializes a [`Tokenizer`] with an underlying [`Read`] instance.
     ///
     /// If the [`Read`] instance is a [`BufReader`], it is better to use
     /// [`from_buf_reader`][Self::from_buf_reader] to avoid unnecessary copying of the read data.
@@ -180,7 +180,7 @@ impl<'a> Tokenizer<'a> {
         Self::from_boxed_dyn_read(Box::new(read))
     }
 
-    /// Initialize a [`Tokenizer`] with an underlying boxed [`Read`] instance.
+    /// Initializes a [`Tokenizer`] with an underlying boxed [`Read`] instance.
     ///
     /// If the [`Read`] instance is a [`BufReader`], it is better to use
     /// [`from_buf_reader`][Self::from_buf_reader] to avoid unnecessary copying of the read data.
@@ -212,7 +212,7 @@ impl<'a> Tokenizer<'a> {
         tokenizer
     }
 
-    /// Get current token.
+    /// Returns the current token.
     #[inline]
     pub fn current_token(&self) -> Token {
         let TokenData {
@@ -241,7 +241,7 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    /// Get the [`TokenKind`] of the current token.
+    /// Returns the [`TokenKind`] of the current token.
     ///
     /// Equivalent to `tokenizer.current_token().kind`, but this does not depend on the compiler
     /// optimizing away the fields that are not accessed.
@@ -250,7 +250,7 @@ impl<'a> Tokenizer<'a> {
         self.current_token_data.kind
     }
 
-    /// Get the value of the current token.
+    /// Returns the value of the current token.
     ///
     /// Equivalent to `tokenizer.current_token().value`, but this does not depend on the compiler
     /// optimizing away the fields that are not accessed.
@@ -259,7 +259,7 @@ impl<'a> Tokenizer<'a> {
         self.current_token_data.value
     }
 
-    /// Advance to the next token, processing more input when required.
+    /// Advances to the next token, processing more input when required.
     ///
     /// This may be called even after reaching `TokenKind::EndOfFile` or `TokenKind::IoError`, in
     /// which case this is a no-op.
@@ -273,7 +273,7 @@ impl<'a> Tokenizer<'a> {
         self.fill_current_token();
     }
 
-    /// Update the data of the current token.
+    /// Updates the data of the current token.
     ///
     /// Invoked initially for the first token and after every call to [`advance`][Self::advance].
     fn fill_current_token(&mut self) {
@@ -285,7 +285,7 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    /// Return any encountered IO errors.
+    /// Returns any encountered IO errors.
     pub fn check_io_error(&mut self) -> io::Result<()> {
         if let Some(err) = self.io_error.take() {
             Err(err)
@@ -294,7 +294,7 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    /// The line number of the current token.
+    /// Returns the line number of the current token.
     ///
     /// The first line is line number 1.
     pub fn current_line(&self) -> usize {
@@ -394,7 +394,7 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    /// Handle an overlong token that does not fit into the fixed buffer.
+    /// Handles an overlong token that does not fit into the fixed buffer.
     ///
     /// This assumes `scanned_upto` is at the start of the overlong token already and that the token
     /// continuous until `len` i.e. the end of the valid data in the buffer.
@@ -503,7 +503,7 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    /// Process data `scanned_upto..len` in the fixed buffer
+    /// Processes data `scanned_upto..len` in the fixed buffer
     #[inline(never)]
     fn scan(&mut self) {
         // SAFETY it is important that this method only creates TokenDatas with valid begin and len

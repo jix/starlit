@@ -57,7 +57,7 @@ macro_rules! parse_error {
 }
 
 impl<'a> Parser<'a> {
-    /// Initialize a [`Parser`] from a [`Tokenizer`].
+    /// Initializes a [`Parser`] from a [`Tokenizer`].
     pub fn new(tokenizer: Tokenizer<'a>) -> Self {
         Parser {
             tokenizer,
@@ -69,12 +69,12 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Initialize a [`Parser`] from a [`BufReader`].
+    /// Initializes a [`Parser`] from a [`BufReader`].
     pub fn from_buf_reader(buf_reader: BufReader<impl Read + 'a>) -> Self {
         Self::new(Tokenizer::from_buf_reader(buf_reader))
     }
 
-    /// Initialize a [`Parser`] with an underlying [`Read`] instance.
+    /// Initializes a [`Parser`] with an underlying [`Read`] instance.
     ///
     /// If the [`Read`] instance is a [`BufReader`], it is better to use
     /// [`from_buf_reader`][Self::from_buf_reader] to avoid unnecessary copying of the read data.
@@ -155,7 +155,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parse and return the header of a DIMACS CNF file.
+    /// Parses and returns the header of a DIMACS CNF file.
     ///
     /// This caches the result and can be called at any point during parsing.
     pub fn header(&mut self) -> Result<Option<Header>, ParseError> {
@@ -189,7 +189,7 @@ impl<'a> Parser<'a> {
         Ok(self.header)
     }
 
-    /// Parse and return the next clause.
+    /// Parses and returns the next clause.
     ///
     /// Returns `Ok<None>` on end of file.
     pub fn next_clause(&mut self) -> Result<Option<&[Lit]>, ParseError> {
