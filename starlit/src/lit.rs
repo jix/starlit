@@ -113,6 +113,18 @@ impl fmt::Display for Var {
     }
 }
 
+impl flussab_cnf::Dimacs for Var {
+    const MAX_DIMACS: isize = Var::MAX_DIMACS;
+
+    fn from_dimacs(value: isize) -> Self {
+        Var::from_dimacs(value)
+    }
+
+    fn dimacs(self) -> isize {
+        Var::dimacs(self)
+    }
+}
+
 /// A Boolean literal.
 ///
 /// A literal is a variable or the negation of a variable.
@@ -254,6 +266,18 @@ impl Lit {
         Lit {
             code: self.code ^ a.code ^ b.code,
         }
+    }
+}
+
+impl flussab_cnf::Dimacs for Lit {
+    const MAX_DIMACS: isize = Var::MAX_DIMACS;
+
+    fn from_dimacs(value: isize) -> Self {
+        Lit::from_dimacs(value)
+    }
+
+    fn dimacs(self) -> isize {
+        Lit::dimacs(self)
     }
 }
 
