@@ -28,7 +28,7 @@ impl ConflictClause {
 
 /// Data used exclusively during conflict analysis.
 #[derive(Default)]
-pub struct ConflictAnalysisData {
+pub struct ConflictAnalysis {
     /// Literals of the current conflicting clause.
     ///
     /// Every true value corresponds to the literal assigned in the trail step of the same index.
@@ -48,7 +48,7 @@ pub struct ConflictAnalysisData {
     current_level_lit_count: usize,
 }
 
-impl ConflictAnalysisData {
+impl ConflictAnalysis {
     /// Reserves enough buffer space for analyzing the current conflict.
     fn update_trail_len(&mut self, trail_len: usize) {
         self.current_clause_lits
@@ -57,16 +57,16 @@ impl ConflictAnalysisData {
 }
 
 /// References to all data used during conflict analysis.
-pub struct ConflictAnalysis<'a> {
+pub struct ConflictAnalysisOps<'a> {
     /// Trail and resulting partial assignment.
     pub trail: &'a mut Trail,
     /// The formula where propagation caused a conflict.
     pub clauses: &'a mut Clauses,
     /// Conflict analysis exclusive data.
-    pub data: &'a mut ConflictAnalysisData,
+    pub conflict_analysis: &'a mut ConflictAnalysis,
 }
 
-impl<'a> ConflictAnalysis<'a> {
+impl<'a> ConflictAnalysisOps<'a> {
     /// Analyzes a conflict, learning a new clause that avoids that conflict in the future.
     ///
     /// This derives an asserting 1-UIP clause and backtracks such that the new clause is no longer
@@ -82,19 +82,21 @@ impl<'a> ConflictAnalysis<'a> {
 
     /// Adds the derived clause to the current formula and propagate the newly asserted literal.
     fn learn_and_propagate(&mut self) {
-        let reason: Reason = if self.data.derived_clause.len() == 1 {
+        let reason: Reason = if self.conflict_analysis.derived_clause.len() == 1 {
             Reason::Unit
         } else {
-            self.clauses.add_clause(&self.data.derived_clause).into()
+            self.clauses
+                .add_clause(&self.conflict_analysis.derived_clause)
+                .into()
         };
 
         #[cfg(debug_assertions)]
-        for &lit in &self.data.derived_clause[1..] {
+        for &lit in &self.conflict_analysis.derived_clause[1..] {
             debug_assert!(self.trail.assigned.is_false(lit));
         }
 
         self.trail.assign(Step {
-            assigned_lit: self.data.derived_clause[0],
+            assigned_lit: self.conflict_analysis.derived_clause[0],
             decision_level: self.trail.decision_level(),
             reason,
         });
@@ -107,20 +109,26 @@ impl<'a> ConflictAnalysis<'a> {
     /// literals.
     fn backtrack(&mut self) {
         // Move the literal propagated after backtracing to index 0 (unit propagation invariant).
-        let derived_clause_len = self.data.derived_clause.len();
-        self.data.derived_clause.swap(0, derived_clause_len - 1);
+        let derived_clause_len = self.conflict_analysis.derived_clause.len();
+        self.conflict_analysis
+            .derived_clause
+            .swap(0, derived_clause_len - 1);
 
         let mut backtrack_level = 0;
 
         if derived_clause_len > 1 {
             // Of the remaining literals move the one with the largest trail index to index 1
             // (maintains unit propagation invariant on further backtracking).
-            let mut largest_trail_index = self.trail.trail_index(self.data.derived_clause[1].var());
+            let mut largest_trail_index = self
+                .trail
+                .trail_index(self.conflict_analysis.derived_clause[1].var());
             for i in 2..derived_clause_len {
-                let trail_index = self.trail.trail_index(self.data.derived_clause[i].var());
+                let trail_index = self
+                    .trail
+                    .trail_index(self.conflict_analysis.derived_clause[i].var());
                 if trail_index > largest_trail_index {
                     largest_trail_index = trail_index;
-                    self.data.derived_clause.swap(1, i);
+                    self.conflict_analysis.derived_clause.swap(1, i);
                 }
             }
 
@@ -135,15 +143,16 @@ impl<'a> ConflictAnalysis<'a> {
     /// The derived clause is stored in `self.data.derived_clause`. The UIP will be the last literal
     /// of the derived clause.
     fn derive_1uip_clause(&mut self, conflict: ConflictClause) {
-        self.data.derived_clause.clear();
+        self.conflict_analysis.derived_clause.clear();
 
-        self.data.update_trail_len(self.trail.steps().len());
+        self.conflict_analysis
+            .update_trail_len(self.trail.steps().len());
 
         // Here we learn a new 1-UIP clause from the conflict
 
         // We start with the conflict clause itself:
         for &lit in conflict.lits(&self.clauses) {
-            Self::add_literal(&mut self.data, self.trail, lit);
+            Self::add_literal(&mut self.conflict_analysis, self.trail, lit);
         }
 
         // As long as there are multiple literals of the current decision level in the current
@@ -163,34 +172,39 @@ impl<'a> ConflictAnalysis<'a> {
 
             // If the corresponding literal is in the current clause remove it. (We will either
             // resolve on it or place it back when we are done.)
-            if !replace(&mut self.data.current_clause_lits[trail_index], false) {
+            if !replace(
+                &mut self.conflict_analysis.current_clause_lits[trail_index],
+                false,
+            ) {
                 continue;
             }
 
             let step = &self.trail.steps()[trail_index];
 
-            self.data.current_level_lit_count -= 1;
-            if self.data.current_level_lit_count == 0 {
+            self.conflict_analysis.current_level_lit_count -= 1;
+            if self.conflict_analysis.current_level_lit_count == 0 {
                 // If this was the last literal at the current decision level we found a 1-UIP
                 // clause. We clear `current_clause_lits` and add the corresponding literal to
                 // `derived_clause` without resolving on it.
-                for &lit in &self.data.derived_clause {
+                for &lit in &self.conflict_analysis.derived_clause {
                     let trail_index = self.trail.trail_index(lit.var());
-                    self.data.current_clause_lits[trail_index] = false;
+                    self.conflict_analysis.current_clause_lits[trail_index] = false;
                 }
-                self.data.derived_clause.push(!step.assigned_lit);
+                self.conflict_analysis
+                    .derived_clause
+                    .push(!step.assigned_lit);
                 break;
             } else {
                 // We resolve the current clause on the literal at `trail_index`. We already removed
                 // that literal from the current clause, so we only need to add the asserting
                 // literals to get the resolvent.
                 for &asserting_lit in step.reason.lits(self.clauses) {
-                    Self::add_literal(&mut self.data, self.trail, asserting_lit);
+                    Self::add_literal(&mut self.conflict_analysis, self.trail, asserting_lit);
                 }
             }
         }
 
-        assert_eq!(self.data.current_level_lit_count, 0);
+        assert_eq!(self.conflict_analysis.current_level_lit_count, 0);
     }
 
     /// Adds a literal to the current clause.
@@ -201,7 +215,7 @@ impl<'a> ConflictAnalysis<'a> {
     /// Otherwise, if the literal is not of the current decision level it is directly added to the
     /// `derived_clause`. If it is of the current decision level, the corresponding counter is
     /// updated.
-    fn add_literal(data: &mut ConflictAnalysisData, trail: &Trail, lit: Lit) {
+    fn add_literal(data: &mut ConflictAnalysis, trail: &Trail, lit: Lit) {
         let trail_index = trail.trail_index(lit.var());
         let lit_decision_level = trail.steps()[trail_index].decision_level;
         // If the literal is assigned at level zero, it is always falsified and we can directly
@@ -265,7 +279,7 @@ mod tests {
             -4, 1;
         ];
         let mut trail = trail!(clauses);
-        let mut data = ConflictAnalysisData::default();
+        let mut data = ConflictAnalysis::default();
 
         trail.assign_decision(Lit::from_dimacs(4));
 
@@ -276,10 +290,10 @@ mod tests {
         .propagate()
         .unwrap_err();
 
-        ConflictAnalysis {
+        ConflictAnalysisOps {
             trail: &mut trail,
             clauses: &mut clauses,
-            data: &mut data,
+            conflict_analysis: &mut data,
         }
         .analyze_conflict(conflict);
 
@@ -308,7 +322,7 @@ mod tests {
             -7, 5;
         ];
         let mut trail = trail!(clauses);
-        let mut data = ConflictAnalysisData::default();
+        let mut data = ConflictAnalysis::default();
 
         trail.assign_decision(Lit::from_dimacs(1));
 
@@ -328,10 +342,10 @@ mod tests {
         .propagate()
         .unwrap_err();
 
-        ConflictAnalysis {
+        ConflictAnalysisOps {
             trail: &mut trail,
             clauses: &mut clauses,
-            data: &mut data,
+            conflict_analysis: &mut data,
         }
         .analyze_conflict(conflict);
 
@@ -365,7 +379,7 @@ mod tests {
             -7, 5;
         ];
         let mut trail = trail!(clauses);
-        let mut data = ConflictAnalysisData::default();
+        let mut data = ConflictAnalysis::default();
 
         trail.assign_decision(Lit::from_dimacs(1));
 
@@ -385,10 +399,10 @@ mod tests {
         .propagate()
         .unwrap_err();
 
-        ConflictAnalysis {
+        ConflictAnalysisOps {
             trail: &mut trail,
             clauses: &mut clauses,
-            data: &mut data,
+            conflict_analysis: &mut data,
         }
         .analyze_conflict(conflict);
 
