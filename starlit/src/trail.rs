@@ -102,7 +102,7 @@ impl Trail {
     /// Adds a step that assigns a literal to the trail.
     pub fn assign(&mut self, step: Step) {
         self.trail_index[step.assigned_lit.index()] = self.steps.len() as _;
-        debug_assert!(self.assigned.is_unassigned(step.assigned_lit));
+        debug_assert!(self.assigned.is_unassigned(step.assigned_lit.var()));
         self.assigned.assign(step.assigned_lit);
         self.steps.push(step);
     }
@@ -249,10 +249,10 @@ impl PartialAssignment {
 
     /// Returns `true` if the literal is not assigned.
     #[inline(always)]
-    pub fn is_unassigned(&self, lit: Lit) -> bool {
+    pub fn is_unassigned(&self, var: Var) -> bool {
         // TODO verify whether comparing two `Option<bool>` still generates branches and fix that
         // using a transmute hack
-        self.assigned[lit.index()] == None
+        self.assigned[var.index()] == None
     }
 }
 
