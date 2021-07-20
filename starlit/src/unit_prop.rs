@@ -10,23 +10,36 @@ use crate::{
     clauses::Clauses,
     conflict_analysis::ConflictClause,
     lit::Lit,
-    trail::{Reason, Step, Trail},
+    trail::{BacktrackCallbacks, Reason, Step, Trail},
 };
 
-/// References to all data used during unit propagation.
-pub struct UnitProp<'a> {
-    /// Trail and resulting partial assignment.
-    pub trail: &'a mut Trail,
-    /// Clauses to check for units under the current assignment.
-    pub clauses: &'a mut Clauses,
+/// Tracks the state of unit propagation
+#[derive(Default)]
+pub struct UnitProp {
+    /// Size of the trail's prefix for which unit propagation was performed.
+    pub propagated: usize,
 }
 
-impl<'a> UnitProp<'a> {
+impl BacktrackCallbacks for UnitProp {
+    fn backtracked(&mut self, trail: &Trail) {
+        self.propagated = self.propagated.min(trail.steps().len());
+    }
+}
+
+/// References to all data used during unit propagation.
+#[allow(missing_docs)]
+pub struct UnitPropOps<'a> {
+    pub trail: &'a mut Trail,
+    pub clauses: &'a mut Clauses,
+    pub unit_prop: &'a mut UnitProp,
+}
+
+impl<'a> UnitPropOps<'a> {
     /// Performs unit propagation.
     pub fn propagate(&mut self) -> Result<(), ConflictClause> {
-        while self.trail.propagated < self.trail.steps().len() {
-            self.propagate_literal(self.trail.steps()[self.trail.propagated].assigned_lit)?;
-            self.trail.propagated += 1;
+        while self.unit_prop.propagated < self.trail.steps().len() {
+            self.propagate_literal(self.trail.steps()[self.unit_prop.propagated].assigned_lit)?;
+            self.unit_prop.propagated += 1;
         }
         Ok(())
     }
@@ -223,9 +236,11 @@ mod tests {
         ($unit_prop:ident, $clauses:ident) => {
             let mut trail = Trail::default();
             trail.set_var_count($clauses.var_count());
-            let mut $unit_prop = UnitProp {
+            let mut unit_prop = UnitProp::default();
+            let mut $unit_prop = UnitPropOps {
                 trail: &mut trail,
                 clauses: &mut $clauses,
+                unit_prop: &mut unit_prop,
             };
         };
     }

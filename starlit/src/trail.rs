@@ -78,10 +78,6 @@ pub struct Trail {
     /// Sequence of performed steps.
     steps: Vec<Step>,
 
-    // TODO is this the right place?
-    /// Size of the trail's prefix for which unit propagation was performed.
-    pub propagated: usize,
-
     /// Trail indices of decisions.
     ///
     /// The first entry does not represent a decision and is fixed at 0 so that each entry on the
@@ -96,7 +92,6 @@ impl Default for Trail {
             assigned: PartialAssignment::default(),
             trail_index: vec![],
             steps: vec![],
-            propagated: 0,
             decisions: vec![0],
         }
     }
@@ -166,7 +161,11 @@ impl Trail {
     /// This undoes all assignments of a higher decision level.
     ///
     /// Panics if the target decision level is the current decision level or higher.
-    pub fn backtrack_to_level(&mut self, decision_level: LitIdx) {
+    pub fn backtrack_to_level(
+        &mut self,
+        decision_level: LitIdx,
+        callbacks: &mut impl BacktrackCallbacks,
+    ) {
         assert!(decision_level < self.decision_level());
 
         // Get the index corresponding to the lowest decision to undo
@@ -184,10 +183,18 @@ impl Trail {
             }
         }
 
-        self.propagated = self.propagated.min(target_trail_len);
         self.decisions.truncate(decision_level as usize + 1);
+        callbacks.backtracked(self);
     }
 }
+
+/// Callbacks to synchronize state with backtracking on the trail.
+pub trait BacktrackCallbacks {
+    /// Called after backtracking finished with the resulting trail.
+    fn backtracked(&mut self, _trail: &Trail) {}
+}
+
+impl BacktrackCallbacks for () {}
 
 impl TracksVarCount for Trail {
     fn var_count(&self) -> usize {

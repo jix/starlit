@@ -4,7 +4,7 @@ use std::mem::replace;
 use crate::{
     clauses::{long::ClauseRef, Clauses},
     lit::Lit,
-    trail::{Reason, Step, Trail},
+    trail::{BacktrackCallbacks, Reason, Step, Trail},
 };
 
 /// Reference to a falsified clause.
@@ -73,10 +73,14 @@ impl<'a> ConflictAnalysisOps<'a> {
     /// in conflict, but instead propagates a new assignment.
     ///
     /// This only propagates a single new literal and needs to be followed by unit propagation.
-    pub fn analyze_conflict(&mut self, conflict: ConflictClause) {
+    pub fn analyze_conflict(
+        &mut self,
+        conflict: ConflictClause,
+        backtrack_callbacks: &mut impl BacktrackCallbacks,
+    ) {
         assert!(self.trail.decision_level() != 0);
         self.derive_1uip_clause(conflict);
-        self.backtrack();
+        self.backtrack(backtrack_callbacks);
         self.learn_and_propagate();
     }
 
@@ -107,7 +111,7 @@ impl<'a> ConflictAnalysisOps<'a> {
     /// This also reorders the literals of the derived clause such that after backtracking the first
     /// literal is unassigned and the second literal has the highest trail index of the remaining
     /// literals.
-    fn backtrack(&mut self) {
+    fn backtrack(&mut self, backtrack_callbacks: &mut impl BacktrackCallbacks) {
         // Move the literal propagated after backtracing to index 0 (unit propagation invariant).
         let derived_clause_len = self.conflict_analysis.derived_clause.len();
         self.conflict_analysis
@@ -135,7 +139,8 @@ impl<'a> ConflictAnalysisOps<'a> {
             backtrack_level = self.trail.steps()[largest_trail_index].decision_level;
         }
 
-        self.trail.backtrack_to_level(backtrack_level);
+        self.trail
+            .backtrack_to_level(backtrack_level, backtrack_callbacks);
     }
 
     /// Derives the 1-UIP clause from the implication graph and the given conflict.
@@ -241,7 +246,11 @@ impl<'a> ConflictAnalysisOps<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{lit::Var, tracking::TracksVarCount, unit_prop::UnitProp};
+    use crate::{
+        lit::Var,
+        tracking::TracksVarCount,
+        unit_prop::{UnitProp, UnitPropOps},
+    };
 
     use super::*;
 
@@ -280,12 +289,14 @@ mod tests {
         ];
         let mut trail = trail!(clauses);
         let mut data = ConflictAnalysis::default();
+        let mut unit_prop = UnitProp::default();
 
         trail.assign_decision(Lit::from_dimacs(4));
 
-        let conflict = UnitProp {
+        let conflict = UnitPropOps {
             trail: &mut trail,
             clauses: &mut clauses,
+            unit_prop: &mut unit_prop,
         }
         .propagate()
         .unwrap_err();
@@ -295,13 +306,14 @@ mod tests {
             clauses: &mut clauses,
             conflict_analysis: &mut data,
         }
-        .analyze_conflict(conflict);
+        .analyze_conflict(conflict, &mut unit_prop);
 
         assert_eq!(data.derived_clause, &clause![-1]);
 
-        UnitProp {
+        UnitPropOps {
             trail: &mut trail,
             clauses: &mut clauses,
+            unit_prop: &mut unit_prop,
         }
         .propagate()
         .unwrap();
@@ -323,21 +335,24 @@ mod tests {
         ];
         let mut trail = trail!(clauses);
         let mut data = ConflictAnalysis::default();
+        let mut unit_prop = UnitProp::default();
 
         trail.assign_decision(Lit::from_dimacs(1));
 
-        UnitProp {
+        UnitPropOps {
             trail: &mut trail,
             clauses: &mut clauses,
+            unit_prop: &mut unit_prop,
         }
         .propagate()
         .unwrap();
 
         trail.assign_decision(Lit::from_dimacs(6));
 
-        let conflict = UnitProp {
+        let conflict = UnitPropOps {
             trail: &mut trail,
             clauses: &mut clauses,
+            unit_prop: &mut unit_prop,
         }
         .propagate()
         .unwrap_err();
@@ -347,11 +362,12 @@ mod tests {
             clauses: &mut clauses,
             conflict_analysis: &mut data,
         }
-        .analyze_conflict(conflict);
+        .analyze_conflict(conflict, &mut unit_prop);
 
-        UnitProp {
+        UnitPropOps {
             trail: &mut trail,
             clauses: &mut clauses,
+            unit_prop: &mut unit_prop,
         }
         .propagate()
         .ok()
@@ -380,21 +396,24 @@ mod tests {
         ];
         let mut trail = trail!(clauses);
         let mut data = ConflictAnalysis::default();
+        let mut unit_prop = UnitProp::default();
 
         trail.assign_decision(Lit::from_dimacs(1));
 
-        UnitProp {
+        UnitPropOps {
             trail: &mut trail,
             clauses: &mut clauses,
+            unit_prop: &mut unit_prop,
         }
         .propagate()
         .unwrap();
 
         trail.assign_decision(Lit::from_dimacs(6));
 
-        let conflict = UnitProp {
+        let conflict = UnitPropOps {
             trail: &mut trail,
             clauses: &mut clauses,
+            unit_prop: &mut unit_prop,
         }
         .propagate()
         .unwrap_err();
@@ -404,11 +423,12 @@ mod tests {
             clauses: &mut clauses,
             conflict_analysis: &mut data,
         }
-        .analyze_conflict(conflict);
+        .analyze_conflict(conflict, &mut unit_prop);
 
-        UnitProp {
+        UnitPropOps {
             trail: &mut trail,
             clauses: &mut clauses,
+            unit_prop: &mut unit_prop,
         }
         .propagate()
         .ok()
