@@ -126,7 +126,7 @@ impl Vsids {
         // find an unassigned variable.
         while let Some(index) = self.activity.pop_max() {
             let var = Var::from_index(index);
-            if assignment.is_unassigned(var) {
+            if !assignment.is_assigned(var) {
                 return Some(var);
             }
         }
