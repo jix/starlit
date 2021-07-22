@@ -3,8 +3,9 @@ use std::mem::replace;
 
 use crate::{
     clauses::{long::ClauseRef, Clauses},
-    lit::Lit,
+    lit::{Lit, Var},
     trail::{BacktrackCallbacks, Reason, Step, Trail},
+    unit_prop::UnitProp,
 };
 
 /// Reference to a falsified clause.
@@ -76,11 +77,12 @@ impl<'a> ConflictAnalysisOps<'a> {
     pub fn analyze_conflict(
         &mut self,
         conflict: ConflictClause,
-        backtrack_callbacks: &mut impl BacktrackCallbacks,
+        callbacks: &mut impl ConflictAnalysisCallbacks,
     ) {
         assert!(self.trail.decision_level() != 0);
-        self.derive_1uip_clause(conflict);
-        self.backtrack(backtrack_callbacks);
+        self.derive_1uip_clause(conflict, callbacks);
+        callbacks.analyzed_conflict();
+        self.backtrack(callbacks);
         self.learn_and_propagate();
     }
 
@@ -147,7 +149,11 @@ impl<'a> ConflictAnalysisOps<'a> {
     ///
     /// The derived clause is stored in `self.data.derived_clause`. The UIP will be the last literal
     /// of the derived clause.
-    fn derive_1uip_clause(&mut self, conflict: ConflictClause) {
+    fn derive_1uip_clause(
+        &mut self,
+        conflict: ConflictClause,
+        callbacks: &mut impl ConflictAnalysisCallbacks,
+    ) {
         self.conflict_analysis.derived_clause.clear();
 
         self.conflict_analysis
@@ -157,7 +163,7 @@ impl<'a> ConflictAnalysisOps<'a> {
 
         // We start with the conflict clause itself:
         for &lit in conflict.lits(&self.clauses) {
-            Self::add_literal(&mut self.conflict_analysis, self.trail, lit);
+            Self::add_literal(&mut self.conflict_analysis, self.trail, lit, callbacks);
         }
 
         // As long as there are multiple literals of the current decision level in the current
@@ -204,7 +210,12 @@ impl<'a> ConflictAnalysisOps<'a> {
                 // that literal from the current clause, so we only need to add the asserting
                 // literals to get the resolvent.
                 for &asserting_lit in step.reason.lits(self.clauses) {
-                    Self::add_literal(&mut self.conflict_analysis, self.trail, asserting_lit);
+                    Self::add_literal(
+                        &mut self.conflict_analysis,
+                        self.trail,
+                        asserting_lit,
+                        callbacks,
+                    );
                 }
             }
         }
@@ -220,7 +231,12 @@ impl<'a> ConflictAnalysisOps<'a> {
     /// Otherwise, if the literal is not of the current decision level it is directly added to the
     /// `derived_clause`. If it is of the current decision level, the corresponding counter is
     /// updated.
-    fn add_literal(data: &mut ConflictAnalysis, trail: &Trail, lit: Lit) {
+    fn add_literal(
+        data: &mut ConflictAnalysis,
+        trail: &Trail,
+        lit: Lit,
+        callbacks: &mut impl ConflictAnalysisCallbacks,
+    ) {
         let trail_index = trail.trail_index(lit.var());
         let lit_decision_level = trail.steps()[trail_index].decision_level;
         // If the literal is assigned at level zero, it is always falsified and we can directly
@@ -232,6 +248,7 @@ impl<'a> ConflictAnalysisOps<'a> {
         if replace(&mut data.current_clause_lits[trail_index], true) {
             return;
         }
+        callbacks.var_in_conflict(lit.var());
         if lit_decision_level == trail.decision_level() {
             // If the literal is assigned at the current decision level, we may want
             // to resolve on it.
@@ -243,6 +260,18 @@ impl<'a> ConflictAnalysisOps<'a> {
         }
     }
 }
+
+/// Callbacks to update state related to conflict analysis.
+pub trait ConflictAnalysisCallbacks: BacktrackCallbacks {
+    /// Called for each variable on the conflict side during analysis.
+    fn var_in_conflict(&mut self, _var: Var) {}
+
+    /// Called after a conflict was analyzed, before backtracing and learning.
+    fn analyzed_conflict(&mut self) {}
+}
+
+impl ConflictAnalysisCallbacks for () {}
+impl ConflictAnalysisCallbacks for UnitProp {}
 
 #[cfg(test)]
 mod tests {

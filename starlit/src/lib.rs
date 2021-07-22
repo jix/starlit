@@ -8,8 +8,10 @@ pub mod util;
 
 pub mod clauses;
 pub mod conflict_analysis;
+pub mod decision;
 pub mod heap;
 pub mod lit;
+pub mod search;
 pub mod tracking;
 pub mod trail;
 pub mod unit_prop;

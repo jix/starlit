@@ -174,6 +174,7 @@ impl Trail {
         for step in self.steps.drain(target_trail_len..) {
             let lit = step.assigned_lit;
             // Undo the assignment
+            callbacks.unassign(lit);
             self.assigned.unassign(lit.var());
             #[cfg(debug_assertions)]
             {
@@ -190,6 +191,9 @@ impl Trail {
 
 /// Callbacks to synchronize state with backtracking on the trail.
 pub trait BacktrackCallbacks {
+    /// Called before undoing the assignment `lit`.
+    fn unassign(&mut self, _lit: Lit) {}
+
     /// Called after backtracking finished with the resulting trail.
     fn backtracked(&mut self, _trail: &Trail) {}
 }
