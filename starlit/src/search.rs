@@ -18,6 +18,7 @@ pub struct Search {
     pub unit_prop: UnitProp,
     pub conflict_analysis: ConflictAnalysis,
     pub vsids: Vsids,
+    pub stats: SearchStats,
 }
 
 impl TracksVarCount for Search {
@@ -38,6 +39,8 @@ impl Search {
     /// Currently this always runs to completion.
     pub fn search(&mut self) -> bool {
         loop {
+            let previously_propagated = self.unit_prop.propagated;
+
             let mut unit_prop = UnitPropOps {
                 trail: &mut self.trail,
                 clauses: &mut self.clauses,
@@ -45,7 +48,10 @@ impl Search {
             };
 
             // Propagate with the current assignment
-            if let Err(conflict) = unit_prop.propagate() {
+            let prop_result = unit_prop.propagate();
+            self.stats.propagations += (self.unit_prop.propagated - previously_propagated) as u64;
+            if let Err(conflict) = prop_result {
+                self.stats.conflicts += 1;
                 if self.trail.decision_level() == 0 {
                     // Conflict without any assumptions means the formula is UNSAT
                     tracing::debug!("UNSAT");
@@ -70,6 +76,7 @@ impl Search {
             } else if let Some(var) = self.vsids.pop_decision_var(&self.trail.assigned) {
                 // When there was no conflict but not all variables are assigned, make a heuristic
                 // decision.
+                self.stats.decisions += 1;
                 tracing::trace!(?var, "decision");
                 self.trail.assign_decision(Lit::from_var(var, true));
             } else {
@@ -105,4 +112,15 @@ impl<'a> ConflictAnalysisCallbacks for Callbacks<'a> {
     fn analyzed_conflict(&mut self) {
         self.vsids.decay();
     }
+}
+
+/// Statistics for the CDCL search.
+#[derive(Default, Debug)]
+pub struct SearchStats {
+    /// Total number of decisions.
+    pub decisions: u64,
+    /// Total number of conflicts.
+    pub conflicts: u64,
+    /// Total number of propagated assignments.
+    pub propagations: u64,
 }

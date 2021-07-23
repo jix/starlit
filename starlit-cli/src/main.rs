@@ -4,7 +4,18 @@ use starlit::{
 };
 
 fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_timer(tracing_subscriber::fmt::time::uptime())
+        .with_level(true)
+        .with_target(true)
+        .with_env_filter(tracing_subscriber::EnvFilter::new(
+            std::env::var("STARLIT_LOG").as_deref().unwrap_or(&"info"),
+        ))
+        .init();
+
+    tracing::info!("Starlit SAT Solver");
+
+    let start = std::time::Instant::now();
 
     // Just a temporary hack to easily allow manual testing from the command line.
     let mut search = starlit::search::Search::default();
@@ -48,7 +59,26 @@ fn main() -> anyhow::Result<()> {
         });
     }
 
-    println!("{:?}", search.search());
+    let satisfiable = search.search();
+
+    let end = std::time::Instant::now();
+    let duration = end - start;
+
+    let duration_secs = duration.as_secs_f64();
+
+    tracing::info!(satisfiable, ?duration);
+    tracing::info!(
+        conflicts = search.stats.conflicts,
+        per_sec = ?search.stats.conflicts as f64 / duration_secs,
+    );
+    tracing::info!(
+        decisions = search.stats.decisions,
+        per_conflict = ?search.stats.decisions as f64 / search.stats.conflicts as f64,
+    );
+    tracing::info!(
+        propagations = search.stats.propagations,
+        per_sec = ?search.stats.propagations as f64 / duration_secs,
+    );
 
     Ok(())
 }
