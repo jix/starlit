@@ -218,7 +218,12 @@ impl TracksVarCount for Trail {
 /// Each variable can be unassigned or assigned to a Boolean value.
 #[derive(Default)]
 pub struct PartialAssignment {
-    assigned: Vec<Option<bool>>,
+    /// Encoded partial assignment.
+    ///
+    /// Stored as one byte per variable. Each byte corresponds to an `Option<bool>`, but we encode
+    /// it manually to get better codegen. We use `0`, `1`, `2` for `Some(false)`, `Some(true)`,
+    /// `None` respectively.
+    assigned: Vec<u8>,
 }
 
 impl PartialAssignment {
@@ -227,37 +232,31 @@ impl PartialAssignment {
     /// A variable can be assigned `false` by assigning `true` to the negated literal.
     #[inline(always)]
     pub fn assign(&mut self, lit: Lit) {
-        self.assigned[lit.index()] = Some(lit.is_positive())
+        self.assigned[lit.index()] = lit.is_positive() as u8
     }
 
     /// Removes any assigned value from a variable.
     #[inline(always)]
     pub fn unassign(&mut self, var: Var) {
-        self.assigned[var.index()] = None
+        self.assigned[var.index()] = 2
     }
 
     /// Returns `true` if the literal is assigned `true`.
     #[inline(always)]
     pub fn is_true(&self, lit: Lit) -> bool {
-        // TODO verify whether comparing two `Option<bool>` still generates branches and fix that
-        // using a transmute hack
-        self.assigned[lit.index()] == Some(lit.is_positive())
+        self.assigned[lit.index()] == lit.is_positive() as u8
     }
 
     /// Returns `true` if the literal is assigned `false`.
     #[inline(always)]
     pub fn is_false(&self, lit: Lit) -> bool {
-        // TODO verify whether comparing two `Option<bool>` still generates branches and fix that
-        // using a transmute hack
-        self.assigned[lit.index()] == Some(lit.is_negative())
+        self.assigned[lit.index()] == lit.is_negative() as u8
     }
 
     /// Returns `true` if the literal is assigned.
     #[inline(always)]
     pub fn is_assigned(&self, var: Var) -> bool {
-        // TODO verify whether comparing two `Option<bool>` still generates branches and fix that
-        // using a transmute hack
-        self.assigned[var.index()] != None
+        self.assigned[var.index()] != 2
     }
 }
 
@@ -267,6 +266,6 @@ impl TracksVarCount for PartialAssignment {
     }
 
     fn set_var_count(&mut self, var_count: usize) {
-        self.assigned.resize(var_count, None)
+        self.assigned.resize(var_count, 2);
     }
 }
