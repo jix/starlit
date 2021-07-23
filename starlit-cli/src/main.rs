@@ -4,6 +4,8 @@ use starlit::{
 };
 
 fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
+
     // Just a temporary hack to easily allow manual testing from the command line.
     let mut search = starlit::search::Search::default();
 

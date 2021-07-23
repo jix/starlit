@@ -48,6 +48,7 @@ impl Search {
             if let Err(conflict) = unit_prop.propagate() {
                 if self.trail.decision_level() == 0 {
                     // Conflict without any assumptions means the formula is UNSAT
+                    tracing::debug!("UNSAT");
                     return false;
                 }
                 // Otherwise we can learn from the conflict and backtrack
@@ -69,10 +70,12 @@ impl Search {
             } else if let Some(var) = self.vsids.pop_decision_var(&self.trail.assigned) {
                 // When there was no conflict but not all variables are assigned, make a heuristic
                 // decision.
+                tracing::trace!(?var, "decision");
                 self.trail.assign_decision(Lit::from_var(var, true));
             } else {
                 // All variables are assigned and unit propagation reported no conflict so the
                 // current assignment is a full satisfying assignment.
+                tracing::debug!("SAT");
                 return true;
             }
         }

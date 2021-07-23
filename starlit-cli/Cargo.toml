@@ -10,3 +10,5 @@ edition = "2018"
 anyhow = "1.0.38"
 starlit = { version = "0.1.0", path = "../starlit" }
 flussab-cnf = "0.2.0"
+tracing = "0.1.26"
+tracing-subscriber = "0.2.18"

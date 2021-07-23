@@ -166,6 +166,7 @@ impl Trail {
         decision_level: LitIdx,
         callbacks: &mut impl BacktrackCallbacks,
     ) {
+        tracing::trace!(decision_level, "backtrack");
         assert!(decision_level < self.decision_level());
 
         // Get the index corresponding to the lowest decision to undo

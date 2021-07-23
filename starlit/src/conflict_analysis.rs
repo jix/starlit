@@ -221,6 +221,8 @@ impl<'a> ConflictAnalysisOps<'a> {
         }
 
         assert_eq!(self.conflict_analysis.current_level_lit_count, 0);
+
+        tracing::trace!(clause = ?self.conflict_analysis.derived_clause, "1-uip");
     }
 
     /// Adds a literal to the current clause.
