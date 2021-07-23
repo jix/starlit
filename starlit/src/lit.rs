@@ -129,8 +129,9 @@ impl flussab_cnf::Dimacs for Var {
 ///
 /// A literal is a variable or the negation of a variable.
 ///
-/// A literal consists of a variable and a flag indicating the polarity of the literal, i.e. whether
-/// the literal represents that variable (positive literal) or its negation (negative literal).
+/// A literal consists of a variable and a flag indicating the polarity (also called phase) of the
+/// literal, i.e. whether the literal represents that variable (positive literal) or its negation
+/// (negative literal).
 ///
 /// Internally a literal is represented as an integer that is two times the index of its variable
 /// when it is negative or one more when it is positive. This integer is called the `code` or

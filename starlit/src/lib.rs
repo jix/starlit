@@ -11,6 +11,7 @@ pub mod conflict_analysis;
 pub mod decision;
 pub mod heap;
 pub mod lit;
+pub mod phases;
 pub mod search;
 pub mod tracking;
 pub mod trail;

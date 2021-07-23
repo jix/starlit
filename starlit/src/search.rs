@@ -4,6 +4,7 @@ use crate::{
     conflict_analysis::{ConflictAnalysis, ConflictAnalysisCallbacks, ConflictAnalysisOps},
     decision::vsids::Vsids,
     lit::{Lit, Var},
+    phases::Phases,
     tracking::TracksVarCount,
     trail::{BacktrackCallbacks, Trail},
     unit_prop::{UnitProp, UnitPropOps},
@@ -18,6 +19,7 @@ pub struct Search {
     pub unit_prop: UnitProp,
     pub conflict_analysis: ConflictAnalysis,
     pub vsids: Vsids,
+    pub phases: Phases,
     pub stats: SearchStats,
 }
 
@@ -30,6 +32,7 @@ impl TracksVarCount for Search {
         self.trail.set_var_count(var_count);
         self.clauses.set_var_count(var_count);
         self.vsids.set_var_count(var_count);
+        self.phases.set_var_count(var_count);
     }
 }
 
@@ -71,14 +74,16 @@ impl Search {
                     &mut Callbacks {
                         unit_prop: &mut self.unit_prop,
                         vsids: &mut self.vsids,
+                        phases: &mut self.phases,
                     },
                 );
             } else if let Some(var) = self.vsids.pop_decision_var(&self.trail.assigned) {
                 // When there was no conflict but not all variables are assigned, make a heuristic
                 // decision.
                 self.stats.decisions += 1;
-                tracing::trace!(?var, "decision");
-                self.trail.assign_decision(Lit::from_var(var, true));
+                let lit = self.phases.decide_phase(var);
+                tracing::trace!(?lit, "decision");
+                self.trail.assign_decision(lit);
             } else {
                 // All variables are assigned and unit propagation reported no conflict so the
                 // current assignment is a full satisfying assignment.
@@ -92,11 +97,13 @@ impl Search {
 struct Callbacks<'a> {
     pub unit_prop: &'a mut UnitProp,
     pub vsids: &'a mut Vsids,
+    pub phases: &'a mut Phases,
 }
 
 impl<'a> BacktrackCallbacks for Callbacks<'a> {
     fn unassign(&mut self, lit: Lit) {
         self.vsids.unassign(lit);
+        self.phases.unassign(lit);
     }
 
     fn backtracked(&mut self, trail: &Trail) {
