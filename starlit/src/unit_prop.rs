@@ -4,13 +4,12 @@
 //! process of repeatedly extending the current partial assignment by all literals propagated by
 //! clauses that are unit under the current assignment until none are left or until a clause is in
 //! conflict.
-use vec_mut_scan::VecMutScan;
-
 use crate::{
     clauses::Clauses,
     conflict_analysis::ConflictClause,
     lit::Lit,
     trail::{BacktrackCallbacks, Reason, Step, Trail},
+    util::mut_scan::MutScan,
 };
 
 /// Tracks the state of unit propagation
@@ -84,7 +83,7 @@ impl<'a> UnitPropOps<'a> {
 
         let mut watches = self.clauses.watch_lists.take(watched_lit);
 
-        let mut scan = VecMutScan::new(&mut watches);
+        let mut scan = MutScan::new(&mut watches);
 
         let mut result = Ok(());
 
@@ -120,6 +119,7 @@ impl<'a> UnitPropOps<'a> {
             // and turning it from unassigned to true. After that b) holds again.
 
             if self.trail.assigned.is_true(watch.blocking_lit) {
+                watch.keep();
                 continue; // Clause already satisfied by `blocking_lit`.
             }
             let (clause_data, clause_lits) = self.clauses.long.data_and_lits_mut(watch.clause);
@@ -137,6 +137,8 @@ impl<'a> UnitPropOps<'a> {
                 // blocking literal to increase the chance of detecting this early the next time we
                 // scan this watch list.
                 watch.blocking_lit = other_watched_lit;
+
+                watch.keep();
                 continue;
             }
 
@@ -158,11 +160,14 @@ impl<'a> UnitPropOps<'a> {
                         // It is true, no need to move the watch, but update the blocking literal
                         watch.blocking_lit = search_lit;
                         clause_data.set_search_pos(search_pos);
+
+                        watch.keep();
                     } else {
                         // It is unassigned, move our watch
-                        let mut watch = watch.remove();
                         watch.blocking_lit = other_watched_lit;
-                        self.clauses.watch_lists.push_watch(search_lit, watch);
+                        self.clauses
+                            .watch_lists
+                            .push_watch(search_lit, watch.remove());
                         clause_data.set_search_pos(search_pos);
                         // Move the newly watched literal to the beginning of the clause
                         clause_lits[0] = search_lit; // Newly watched
@@ -184,6 +189,8 @@ impl<'a> UnitPropOps<'a> {
             if self.trail.assigned.is_false(other_watched_lit) {
                 // All literals are false, i.e. we have a conflict
                 result = Err(ConflictClause::Long(watch.clause));
+
+                watch.keep();
                 break;
             } else {
                 // This clause asserts `other_watched_lit`.
@@ -197,7 +204,9 @@ impl<'a> UnitPropOps<'a> {
                     assigned_lit: other_watched_lit,
                     decision_level: self.trail.decision_level(),
                     reason: Reason::Long(watch.clause),
-                })
+                });
+
+                watch.keep();
             }
         }
 

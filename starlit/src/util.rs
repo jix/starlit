@@ -4,3 +4,5 @@
 //! Eventually everything here should move into separate crates.
 #[macro_use]
 pub mod transparent;
+
+pub mod mut_scan;
