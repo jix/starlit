@@ -18,7 +18,7 @@ fn main() -> anyhow::Result<()> {
     let start = std::time::Instant::now();
 
     // Just a temporary hack to easily allow manual testing from the command line.
-    let mut search = starlit::search::Search::default();
+    let mut solver = starlit::solver::Solver::default();
 
     let mut input = flussab_cnf::cnf::Parser::from_read(
         std::fs::File::open(
@@ -33,7 +33,7 @@ fn main() -> anyhow::Result<()> {
         .header()
         .ok_or_else(|| anyhow::anyhow!("no header in input file"))?;
 
-    search.set_var_count(header.var_count);
+    solver.set_var_count(header.var_count);
 
     let mut units = vec![];
 
@@ -41,25 +41,25 @@ fn main() -> anyhow::Result<()> {
         if let [unit] = *clause {
             units.push(unit);
         } else {
-            search.clauses.add_clause(&clause);
+            solver.search.clauses.add_clause(&clause);
         }
     }
 
     for unit in units {
-        if search.trail.assigned.is_false(unit) {
+        if solver.search.trail.assigned.is_false(unit) {
             println!("{:?}", false);
             return Ok(());
-        } else if search.trail.assigned.is_true(unit) {
+        } else if solver.search.trail.assigned.is_true(unit) {
             continue;
         }
-        search.trail.assign(Step {
+        solver.search.trail.assign(Step {
             assigned_lit: unit,
             decision_level: 0,
             reason: Reason::Unit,
         });
     }
 
-    let satisfiable = search.search();
+    let satisfiable = solver.solve();
 
     let end = std::time::Instant::now();
     let duration = end - start;
@@ -68,16 +68,16 @@ fn main() -> anyhow::Result<()> {
 
     tracing::info!(satisfiable, ?duration);
     tracing::info!(
-        conflicts = search.stats.conflicts,
-        per_sec = ?search.stats.conflicts as f64 / duration_secs,
+        conflicts = solver.search.stats.conflicts,
+        per_sec = ?solver.search.stats.conflicts as f64 / duration_secs,
     );
     tracing::info!(
-        decisions = search.stats.decisions,
-        per_conflict = ?search.stats.decisions as f64 / search.stats.conflicts as f64,
+        decisions = solver.search.stats.decisions,
+        per_conflict = ?solver.search.stats.decisions as f64 / solver.search.stats.conflicts as f64,
     );
     tracing::info!(
-        propagations = search.stats.propagations,
-        per_sec = ?search.stats.propagations as f64 / duration_secs,
+        propagations = solver.search.stats.propagations,
+        per_sec = ?solver.search.stats.propagations as f64 / duration_secs,
     );
 
     Ok(())

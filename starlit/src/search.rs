@@ -37,59 +37,72 @@ impl TracksVarCount for Search {
 }
 
 impl Search {
-    /// Performs a CDCL search and returns whether the formula is satisfiable.
-    ///
-    /// Currently this always runs to completion.
-    pub fn search(&mut self) -> bool {
-        loop {
-            let previously_propagated = self.unit_prop.propagated;
+    /// Performs one step of CDCL search and returns whether the formula is satisfiable.
+    pub fn search_step(&mut self) -> Option<bool> {
+        let previously_propagated = self.unit_prop.propagated;
 
-            let mut unit_prop = UnitPropOps {
+        let mut unit_prop = UnitPropOps {
+            trail: &mut self.trail,
+            clauses: &mut self.clauses,
+            unit_prop: &mut self.unit_prop,
+        };
+
+        // Propagate with the current assignment
+        let prop_result = unit_prop.propagate();
+        self.stats.propagations += (self.unit_prop.propagated - previously_propagated) as u64;
+        if let Err(conflict) = prop_result {
+            self.stats.conflicts += 1;
+            if self.trail.decision_level() == 0 {
+                // Conflict without any assumptions means the formula is UNSAT
+                tracing::debug!("UNSAT");
+                return Some(false);
+            }
+            // Otherwise we can learn from the conflict and backtrack
+            let mut conflict_analysis = ConflictAnalysisOps {
                 trail: &mut self.trail,
                 clauses: &mut self.clauses,
-                unit_prop: &mut self.unit_prop,
+                conflict_analysis: &mut self.conflict_analysis,
             };
 
-            // Propagate with the current assignment
-            let prop_result = unit_prop.propagate();
-            self.stats.propagations += (self.unit_prop.propagated - previously_propagated) as u64;
-            if let Err(conflict) = prop_result {
-                self.stats.conflicts += 1;
-                if self.trail.decision_level() == 0 {
-                    // Conflict without any assumptions means the formula is UNSAT
-                    tracing::debug!("UNSAT");
-                    return false;
-                }
-                // Otherwise we can learn from the conflict and backtrack
-                let mut conflict_analysis = ConflictAnalysisOps {
-                    trail: &mut self.trail,
-                    clauses: &mut self.clauses,
-                    conflict_analysis: &mut self.conflict_analysis,
-                };
+            // Learns an asserting clause and backtracks to the level where it turns from
+            // in-conflict to asserting.
+            conflict_analysis.analyze_conflict(
+                conflict,
+                &mut Callbacks {
+                    unit_prop: &mut self.unit_prop,
+                    vsids: &mut self.vsids,
+                    phases: &mut self.phases,
+                },
+            );
+        } else if let Some(var) = self.vsids.pop_decision_var(&self.trail.assigned) {
+            // When there was no conflict but not all variables are assigned, make a heuristic
+            // decision.
+            self.stats.decisions += 1;
+            let lit = self.phases.decide_phase(var);
+            tracing::trace!(?lit, "decision");
+            self.trail.assign_decision(lit);
+        } else {
+            // All variables are assigned and unit propagation reported no conflict so the
+            // current assignment is a full satisfying assignment.
+            tracing::debug!("SAT");
+            return Some(true);
+        }
 
-                // Learns an asserting clause and backtracks to the level where it turns from
-                // in-conflict to asserting.
-                conflict_analysis.analyze_conflict(
-                    conflict,
-                    &mut Callbacks {
-                        unit_prop: &mut self.unit_prop,
-                        vsids: &mut self.vsids,
-                        phases: &mut self.phases,
-                    },
-                );
-            } else if let Some(var) = self.vsids.pop_decision_var(&self.trail.assigned) {
-                // When there was no conflict but not all variables are assigned, make a heuristic
-                // decision.
-                self.stats.decisions += 1;
-                let lit = self.phases.decide_phase(var);
-                tracing::trace!(?lit, "decision");
-                self.trail.assign_decision(lit);
-            } else {
-                // All variables are assigned and unit propagation reported no conflict so the
-                // current assignment is a full satisfying assignment.
-                tracing::debug!("SAT");
-                return true;
-            }
+        None
+    }
+
+    /// Performs a restart by backtracking to decision level 0.
+    pub fn restart(&mut self) {
+        tracing::debug!("restart");
+        if self.trail.decision_level() > 0 {
+            self.trail.backtrack_to_level(
+                0,
+                &mut Callbacks {
+                    unit_prop: &mut self.unit_prop,
+                    vsids: &mut self.vsids,
+                    phases: &mut self.phases,
+                },
+            )
         }
     }
 }
