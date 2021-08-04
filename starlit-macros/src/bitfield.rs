@@ -150,6 +150,7 @@ pub fn derive_bitfield(input: DeriveInput) -> syn::Result<TokenStream> {
     }
 
     output.extend(quote!(
+        #[allow(dead_code)]
         impl #impl_generics #name #ty_generics #where_clause {
             #impls
         }

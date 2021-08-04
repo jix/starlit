@@ -50,6 +50,11 @@ pub struct SolverClauseData {
         ///
         /// Also called Literal Block Distance (LBD).
         6 clamp => pub glue: usize,
+        /// how often the clause was recently used.
+        ///
+        /// This is incremented everytime the clause is involved in a conflict and decremented
+        /// during every reduction. Both increments and decrements are saturating.
+        2 clamp => pub used: usize,
         1, // SAFETY reserve the MSB
     )]
     data: LitIdx,
@@ -70,6 +75,9 @@ impl SolverClauseData {
     pub fn new_learned_clause() -> Self {
         let mut data = Self::default();
         data.set_redundant(true);
+        // Count the initial learning as use, so that the clause can survive an immediately
+        // following reduction.
+        data.set_used(1);
         data
     }
 }

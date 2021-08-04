@@ -3,7 +3,7 @@ use std::mem::replace;
 
 use crate::{
     clauses::{
-        long::{ClauseRef, SolverClauseData},
+        long::{ClauseRef, LongClauses, SolverClauseData},
         Clauses,
     },
     glue::compute_glue,
@@ -185,6 +185,9 @@ impl<'a> ConflictAnalysisOps<'a> {
         // Here we learn a new 1-UIP clause from the conflict
 
         // We start with the conflict clause itself:
+        if let ConflictClause::Long(conflict) = conflict {
+            Self::bump_long_clause(&mut self.clauses.long, conflict);
+        }
         for &lit in conflict.lits(&self.clauses) {
             Self::add_literal(&mut self.conflict_analysis, self.trail, lit, callbacks);
         }
@@ -232,6 +235,9 @@ impl<'a> ConflictAnalysisOps<'a> {
                 // We resolve the current clause on the literal at `trail_index`. We already removed
                 // that literal from the current clause, so we only need to add the asserting
                 // literals to get the resolvent.
+                if let Reason::Long(reason) = step.reason {
+                    Self::bump_long_clause(&mut self.clauses.long, reason);
+                }
                 for &asserting_lit in step.reason.lits(self.clauses) {
                     Self::add_literal(
                         &mut self.conflict_analysis,
@@ -283,6 +289,11 @@ impl<'a> ConflictAnalysisOps<'a> {
             // resolve on it so it will be part of the derived clause.
             data.derived_clause.push(lit);
         }
+    }
+
+    fn bump_long_clause(long_clauses: &mut LongClauses, clause: ClauseRef) {
+        let data = long_clauses.data_mut(clause);
+        data.set_used(data.used() + 1);
     }
 }
 
