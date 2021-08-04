@@ -9,6 +9,7 @@ pub mod util;
 pub mod clauses;
 pub mod conflict_analysis;
 pub mod decision;
+pub mod glue;
 pub mod heap;
 pub mod lit;
 pub mod luby;

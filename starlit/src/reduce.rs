@@ -21,9 +21,13 @@ impl<'a> ReduceOps<'a> {
             if data.protected() {
                 continue;
             }
-            if data.redundant() {
-                long_clauses.delete_clause(clause);
+            if !data.redundant() {
+                continue;
             }
+            if data.glue() <= 2 {
+                continue;
+            }
+            long_clauses.delete_clause(clause);
         }
         self.protect_clauses(false);
     }

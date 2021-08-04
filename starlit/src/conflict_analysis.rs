@@ -6,6 +6,7 @@ use crate::{
         long::{ClauseRef, SolverClauseData},
         Clauses,
     },
+    glue::compute_glue,
     lit::{Lit, Var},
     trail::{BacktrackCallbacks, Reason, Step, Trail},
     unit_prop::UnitProp,
@@ -42,6 +43,9 @@ pub struct ConflictAnalysis {
     /// clause is found.
     current_clause_lits: Vec<bool>,
 
+    /// Temporary decision level flags for glue computation.
+    glue_level_flags: Vec<bool>,
+
     /// Literals of the final derived asserting clause.
     ///
     /// Before a 1-UIP clause is found, this only contains literals below the current decision
@@ -54,9 +58,18 @@ pub struct ConflictAnalysis {
 
 impl ConflictAnalysis {
     /// Reserves enough buffer space for analyzing the current conflict.
-    fn update_trail_len(&mut self, trail_len: usize) {
-        self.current_clause_lits
-            .resize(self.current_clause_lits.len().max(trail_len), false);
+    fn update_trail_len(&mut self, trail: &Trail) {
+        self.current_clause_lits.resize(
+            self.current_clause_lits.len().max(trail.steps().len()),
+            false,
+        );
+
+        self.glue_level_flags.resize(
+            self.glue_level_flags
+                .len()
+                .max(trail.decision_level() as usize + 1),
+            false,
+        );
     }
 }
 
@@ -94,7 +107,14 @@ impl<'a> ConflictAnalysisOps<'a> {
         let reason: Reason = if self.conflict_analysis.derived_clause.len() == 1 {
             Reason::Unit
         } else {
-            let clause_data = SolverClauseData::new_learned_clause();
+            let mut clause_data = SolverClauseData::new_learned_clause();
+
+            clause_data.set_glue(compute_glue(
+                &self.trail,
+                &self.conflict_analysis.derived_clause[1..],
+                &mut self.conflict_analysis.glue_level_flags,
+            ));
+
             self.clauses
                 .add_clause(clause_data, &self.conflict_analysis.derived_clause)
                 .into()
@@ -160,8 +180,7 @@ impl<'a> ConflictAnalysisOps<'a> {
     ) {
         self.conflict_analysis.derived_clause.clear();
 
-        self.conflict_analysis
-            .update_trail_len(self.trail.steps().len());
+        self.conflict_analysis.update_trail_len(&self.trail);
 
         // Here we learn a new 1-UIP clause from the conflict
 

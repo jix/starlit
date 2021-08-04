@@ -46,6 +46,10 @@ pub struct SolverClauseData {
         1 => pub redundant: bool,
         /// whether the clause is protected.
         1 => pub protected: bool,
+        /// the glue level of the clause.
+        ///
+        /// Also called Literal Block Distance (LBD).
+        6 clamp => pub glue: usize,
         1, // SAFETY reserve the MSB
     )]
     data: LitIdx,
