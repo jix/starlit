@@ -1,7 +1,7 @@
 //! Storage for non-unit clauses including watch lists for efficient unit propagation.
 use std::mem::take;
 
-use long::{ClauseRef, LongClauses};
+use long::{ClauseRef, LongClauses, SolverClauseData};
 
 use crate::{lit::Lit, tracking::TracksVarCount};
 
@@ -34,14 +34,14 @@ impl Clauses {
     /// Stores a new clause, returning a `ClauseRef` to the new clause if it is long.
     ///
     /// Returns a reference to the added clause.
-    pub fn add_clause(&mut self, clause_lits: &[Lit]) -> AddedClause {
+    pub fn add_clause(&mut self, data: SolverClauseData, clause_lits: &[Lit]) -> AddedClause {
         match *clause_lits {
             [a, b] => {
                 self.binary.add_clause([a, b]);
                 AddedClause::Binary([a, b])
             }
             [a, b, ..] => {
-                let clause = self.long.add_clause(clause_lits);
+                let clause = self.long.add_clause(data, clause_lits);
                 self.watch_lists.watch_clause(clause, [a, b]);
                 AddedClause::Long(clause)
             }

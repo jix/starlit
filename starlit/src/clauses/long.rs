@@ -1,6 +1,7 @@
 //! Storage of long clauses.
 use std::{cmp::Ordering, hint::unreachable_unchecked, mem::size_of, slice};
 
+use starlit_macros::Bitfield;
 use static_assertions::const_assert;
 
 use crate::{
@@ -37,15 +38,36 @@ pub unsafe trait ClauseData: Copy {
 
 /// Data associated with a clause during solving.
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
+#[derive(Bitfield, Clone, Copy, Default)]
 pub struct SolverClauseData {
     // SAFETY the MSB of any contained word must be zero
+    #[bitfield(
+        /// whether the clause is redundant.
+        1 => pub redundant: bool,
+        /// whether the clause is protected.
+        1 => pub protected: bool,
+        1, // SAFETY reserve the MSB
+    )]
     data: LitIdx,
     /// Used to implement circular scanning during propagation
     ///
     /// See also ["Optimal Implementation of Watched Literals and More General
     /// Techniques"](https://doi.org/10.1613/jair.4016)
     search_pos: LitIdx,
+}
+
+impl SolverClauseData {
+    /// Returns new clause data for an input clause.
+    pub fn new_input_clause() -> Self {
+        Self::default()
+    }
+
+    /// Returns new clause data for a learned clause.
+    pub fn new_learned_clause() -> Self {
+        let mut data = Self::default();
+        data.set_redundant(true);
+        data
+    }
 }
 
 impl SolverClauseData {
@@ -96,13 +118,13 @@ impl<D: ClauseData> ClauseHeader<D> {
     const WORDS: usize = size_of::<Self>() / size_of::<LitIdx>();
     const LEN_OFFSET: usize = Self::WORDS - 1;
 
-    pub fn new(len: usize) -> Self
+    pub fn new(data: D, len: usize) -> Self
     where
         D: Default,
     {
         assert!((LongClauses::<D>::MIN_LEN..=Var::MAX_VAR_COUNT).contains(&len));
         ClauseHeader {
-            data: Default::default(),
+            data,
             len_with_marker: (len as LitIdx) | LIT_IDX_MSB,
         }
     }
@@ -151,14 +173,14 @@ impl<D: ClauseData> LongClauses<D> {
     pub const MIN_LEN: usize = 3;
 
     /// Adds a new clause to the collection.
-    pub fn add_clause(&mut self, clause_lits: &[Lit]) -> ClauseRef
+    pub fn add_clause(&mut self, data: D, clause_lits: &[Lit]) -> ClauseRef
     where
         D: Default,
     {
         let id = self.buffer.len();
         // TODO eventually this check should not panic
         assert!(id <= ClauseRefId::MAX as usize);
-        let header = ClauseHeader::<D>::new(clause_lits.len());
+        let header = ClauseHeader::<D>::new(data, clause_lits.len());
         assert_eq!(
             ClauseHeader::<D>::WORDS * size_of::<LitIdx>(),
             size_of::<ClauseHeader::<D>>()
@@ -584,7 +606,7 @@ mod tests {
         let mut clause_refs = vec![];
 
         for clause_lits in &input_clauses {
-            clause_refs.push(long_clauses.add_clause(clause_lits));
+            clause_refs.push(long_clauses.add_clause(SolverClauseData::default(), clause_lits));
         }
 
         let mut current_clause = None;
@@ -614,7 +636,7 @@ mod tests {
         let mut clause_refs = vec![];
 
         for clause_lits in &input_clauses {
-            clause_refs.push(long_clauses.add_clause(clause_lits));
+            clause_refs.push(long_clauses.add_clause(SolverClauseData::default(), clause_lits));
         }
 
         for ((&clause, &shrunk_len), input_clause) in
@@ -651,7 +673,7 @@ mod tests {
         let mut clause_refs = vec![];
 
         for clause_lits in &input_clauses {
-            clause_refs.push(long_clauses.add_clause(clause_lits));
+            clause_refs.push(long_clauses.add_clause(SolverClauseData::default(), clause_lits));
         }
 
         for &index in delete_indices {
@@ -678,6 +700,45 @@ mod tests {
     }
 
     #[test]
+    fn delete_while_iterating() {
+        let input_clauses = vec![
+            clause![8, 9, 10, 11, 12, 13, 14, 15],
+            clause![1, 2, 3],
+            clause![4, 5, 6, 7],
+            clause![21, 22, 23],
+            clause![16, 17, 18, 19, 20],
+            clause![24, 25, 26],
+        ];
+
+        let mut long_clauses = LongClauses::<SolverClauseData>::default();
+
+        let mut expected_clause_refs = vec![];
+
+        for clause_lits in &input_clauses {
+            let clause = long_clauses.add_clause(SolverClauseData::default(), clause_lits);
+            if clause_lits[0].index() & 1 != 0 {
+                expected_clause_refs.push(clause);
+            }
+        }
+
+        let mut clause_iter = None;
+        while let Some(clause) = long_clauses.next_clause(&mut clause_iter) {
+            if long_clauses.lits(clause)[0].index() & 1 == 0 {
+                long_clauses.delete_clause(clause);
+            }
+        }
+
+        let mut clauses_left = vec![];
+
+        let mut clause_iter = None;
+        while let Some(clause) = long_clauses.next_clause(&mut clause_iter) {
+            clauses_left.push(clause);
+        }
+
+        assert_eq!(clauses_left, expected_clause_refs);
+    }
+
+    #[test]
     fn collect_deleted_clauses() {
         let mut input_clauses = vec![
             clause![8, 9, 10, 11, 12, 13, 14, 15],
@@ -693,7 +754,7 @@ mod tests {
         let mut clause_refs = vec![];
 
         for clause_lits in &input_clauses {
-            clause_refs.push(long_clauses.add_clause(clause_lits));
+            clause_refs.push(long_clauses.add_clause(SolverClauseData::default(), clause_lits));
         }
 
         for &index in delete_indices {

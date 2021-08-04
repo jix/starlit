@@ -1,4 +1,5 @@
 use starlit::{
+    clauses::long::SolverClauseData,
     tracking::TracksVarCount,
     trail::{Reason, Step},
 };
@@ -41,7 +42,10 @@ fn main() -> anyhow::Result<()> {
         if let [unit] = *clause {
             units.push(unit);
         } else {
-            solver.search.clauses.add_clause(&clause);
+            solver
+                .search
+                .clauses
+                .add_clause(SolverClauseData::new_input_clause(), &clause);
         }
     }
 

@@ -13,6 +13,7 @@ pub mod heap;
 pub mod lit;
 pub mod luby;
 pub mod phases;
+pub mod reduce;
 pub mod search;
 pub mod solver;
 pub mod tracking;

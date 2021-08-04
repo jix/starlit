@@ -220,7 +220,7 @@ impl<'a> UnitPropOps<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::tracking::TracksVarCount;
+    use crate::{clauses::long::SolverClauseData, tracking::TracksVarCount};
 
     use super::*;
 
@@ -235,7 +235,7 @@ mod tests {
             let mut clauses = Clauses::default();
             clauses.set_var_count($var_count);
             $(
-                clauses.add_clause(&[$(Lit::from_dimacs($lit)),*]);
+                clauses.add_clause(SolverClauseData::default(), &[$(Lit::from_dimacs($lit)),*]);
             )*
             clauses
         }};

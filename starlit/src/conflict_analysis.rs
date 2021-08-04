@@ -2,7 +2,10 @@
 use std::mem::replace;
 
 use crate::{
-    clauses::{long::ClauseRef, Clauses},
+    clauses::{
+        long::{ClauseRef, SolverClauseData},
+        Clauses,
+    },
     lit::{Lit, Var},
     trail::{BacktrackCallbacks, Reason, Step, Trail},
     unit_prop::UnitProp,
@@ -91,8 +94,9 @@ impl<'a> ConflictAnalysisOps<'a> {
         let reason: Reason = if self.conflict_analysis.derived_clause.len() == 1 {
             Reason::Unit
         } else {
+            let clause_data = SolverClauseData::new_learned_clause();
             self.clauses
-                .add_clause(&self.conflict_analysis.derived_clause)
+                .add_clause(clause_data, &self.conflict_analysis.derived_clause)
                 .into()
         };
 
@@ -296,7 +300,7 @@ mod tests {
             let mut clauses = Clauses::default();
             clauses.set_var_count($var_count);
             $(
-                clauses.add_clause(&[$(Lit::from_dimacs($lit)),*]);
+                clauses.add_clause(SolverClauseData::default(), &[$(Lit::from_dimacs($lit)),*]);
             )*
             clauses
         }};
