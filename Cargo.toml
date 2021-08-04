@@ -1,5 +1,5 @@
 [workspace]
-members = ["starlit", "starlit-cli"]
+members = ["starlit", "starlit-cli", "starlit-macros"]
 
 [profile.release]
 debug = true # Enables profiling
