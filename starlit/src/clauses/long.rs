@@ -526,6 +526,16 @@ impl<D: ClauseData> LongClauses<D> {
             write_offset += storage_size;
         }
 
+        // Detect a gap at the end of the buffer
+        let read_offset = self.buffer.len();
+        if read_offset != expected_read_offset {
+            gaps.push(GcMapGap {
+                start: expected_read_offset as LitIdx,
+                end: read_offset as LitIdx,
+                shift: (read_offset - write_offset) as LitIdx,
+            });
+        }
+
         self.buffer.truncate(write_offset);
 
         ClauseRefGcMap { gaps }
@@ -760,7 +770,7 @@ mod tests {
             clause![16, 17, 18, 19, 20],
             clause![24, 25, 26],
         ];
-        let delete_indices = &[2, 0, 3];
+        let delete_indices = &[2, 0, 3, 5];
         let mut long_clauses = LongClauses::<SolverClauseData>::default();
 
         let mut clause_refs = vec![];
