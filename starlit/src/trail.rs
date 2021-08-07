@@ -1,7 +1,10 @@
 //! Stores a history of steps performed during the search to enable backtracking.
 
 use crate::{
-    clauses::{long::ClauseRef, AddedClause, Clauses},
+    clauses::{
+        long::{ClauseRef, ClauseRefGcMap},
+        AddedClause, Clauses,
+    },
     lit::{Lit, LitIdx, SignedLitIdx, Var},
     tracking::TracksVarCount,
 };
@@ -187,6 +190,15 @@ impl Trail {
 
         self.decisions.truncate(decision_level as usize + 1);
         callbacks.backtracked(self);
+    }
+
+    /// Updates refrence to long clauses after garbage collection.
+    pub fn update_clause_references(&mut self, gc_map: &ClauseRefGcMap) {
+        for step in &mut self.steps {
+            if let Reason::Long(clause) = &mut step.reason {
+                *clause = gc_map.update(*clause).unwrap();
+            }
+        }
     }
 }
 

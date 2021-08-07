@@ -3,7 +3,9 @@ use std::mem::take;
 
 use long::{ClauseRef, LongClauses, SolverClauseData};
 
-use crate::{lit::Lit, tracking::TracksVarCount};
+use crate::{lit::Lit, tracking::TracksVarCount, util::mut_scan::MutScan};
+
+use self::long::ClauseRefGcMap;
 
 pub mod long;
 
@@ -161,6 +163,21 @@ impl WatchLists {
     /// Appends a single `Watch` to the watch list for a given literal.
     pub fn push_watch(&mut self, lit: Lit, watch: Watch) {
         self.by_lit[lit.code()].push(watch);
+    }
+
+    /// Updates refrence to long clauses after garbage collection.
+    pub fn update_clause_references(&mut self, gc_map: &ClauseRefGcMap) {
+        for watches in &mut self.by_lit {
+            let mut scan = MutScan::new(watches);
+            while let Some(mut watch) = scan.next() {
+                if let Some(clause) = gc_map.update(watch.clause) {
+                    watch.clause = clause;
+                    watch.keep();
+                } else {
+                    watch.remove();
+                }
+            }
+        }
     }
 }
 

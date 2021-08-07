@@ -1,6 +1,6 @@
 //! CDCL search.
 use crate::{
-    clauses::Clauses,
+    clauses::{long::ClauseRefGcMap, Clauses},
     conflict_analysis::{ConflictAnalysis, ConflictAnalysisCallbacks, ConflictAnalysisOps},
     decision::vsids::Vsids,
     lit::{Lit, Var},
@@ -39,6 +39,8 @@ impl TracksVarCount for Search {
 impl Search {
     /// Performs one step of CDCL search and returns whether the formula is satisfiable.
     pub fn search_step(&mut self) -> Option<bool> {
+        self.collect_garbage();
+
         let previously_propagated = self.unit_prop.propagated;
 
         let mut unit_prop = UnitPropOps {
@@ -104,6 +106,25 @@ impl Search {
                 },
             )
         }
+    }
+
+    /// Perfoms garbage collection when necessary.
+    pub fn collect_garbage(&mut self) -> Option<ClauseRefGcMap> {
+        self.clauses
+            .long
+            .should_collect_garbage()
+            .then(|| self.collect_garbage_now())
+    }
+
+    /// Unconditionally performs garbage collection.
+    fn collect_garbage_now(&mut self) -> ClauseRefGcMap {
+        tracing::debug!("garbage collection");
+        let gc_map = self.clauses.long.collect_garbage();
+
+        self.trail.update_clause_references(&gc_map);
+        self.clauses.watch_lists.update_clause_references(&gc_map);
+
+        gc_map
     }
 }
 

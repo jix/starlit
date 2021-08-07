@@ -168,6 +168,9 @@ pub struct LongClauses<D: ClauseData = SolverClauseData> {
     /// to a value larger than the length will break clause iteration.
     buffer: Vec<LitIdx>,
 
+    /// Number of words in `buffer` corresponding to deleted clauses.
+    garbage_count: usize,
+
     _marker: std::marker::PhantomData<D>,
 }
 
@@ -175,6 +178,7 @@ impl<D: ClauseData> Default for LongClauses<D> {
     fn default() -> Self {
         Self {
             buffer: Default::default(),
+            garbage_count: 0,
             _marker: std::marker::PhantomData::<D>,
         }
     }
@@ -480,6 +484,7 @@ impl<D: ClauseData> LongClauses<D> {
     /// clause's literals will return an empty slice.
     pub fn delete_clause(&mut self, clause: ClauseRef) {
         let len = self.clause_len(clause);
+        self.garbage_count += len + ClauseHeader::<D>::WORDS;
         if len > 0 {
             unsafe {
                 // SAFETY `clause_len` above asserts that `clause` is valid
@@ -538,7 +543,14 @@ impl<D: ClauseData> LongClauses<D> {
 
         self.buffer.truncate(write_offset);
 
+        self.garbage_count = 0;
+
         ClauseRefGcMap { gaps }
+    }
+
+    /// Returns whether the buffer is at least half full with garbage.
+    pub fn should_collect_garbage(&self) -> bool {
+        self.garbage_count * 2 >= self.buffer.len()
     }
 }
 
