@@ -186,7 +186,12 @@ impl<'a> ConflictAnalysisOps<'a> {
 
         // We start with the conflict clause itself:
         if let ConflictClause::Long(conflict) = conflict {
-            Self::bump_long_clause(&mut self.clauses.long, conflict);
+            Self::bump_long_clause(
+                &self.trail,
+                &mut self.clauses.long,
+                conflict,
+                &mut self.conflict_analysis.glue_level_flags,
+            );
         }
         for &lit in conflict.lits(&self.clauses) {
             Self::add_literal(&mut self.conflict_analysis, self.trail, lit, callbacks);
@@ -236,7 +241,12 @@ impl<'a> ConflictAnalysisOps<'a> {
                 // that literal from the current clause, so we only need to add the asserting
                 // literals to get the resolvent.
                 if let Reason::Long(reason) = step.reason {
-                    Self::bump_long_clause(&mut self.clauses.long, reason);
+                    Self::bump_long_clause(
+                        &self.trail,
+                        &mut self.clauses.long,
+                        reason,
+                        &mut self.conflict_analysis.glue_level_flags,
+                    );
                 }
                 for &asserting_lit in step.reason.lits(self.clauses) {
                     Self::add_literal(
@@ -291,8 +301,14 @@ impl<'a> ConflictAnalysisOps<'a> {
         }
     }
 
-    fn bump_long_clause(long_clauses: &mut LongClauses, clause: ClauseRef) {
-        let data = long_clauses.data_mut(clause);
+    fn bump_long_clause(
+        trail: &Trail,
+        long_clauses: &mut LongClauses,
+        clause: ClauseRef,
+        tmp: &mut [bool],
+    ) {
+        let (data, lits) = long_clauses.data_and_lits_mut(clause);
+        data.set_glue(compute_glue(trail, lits, tmp));
         data.set_used(data.used() + 1);
     }
 }
