@@ -122,7 +122,9 @@ impl Search {
         let gc_map = self.clauses.long.collect_garbage();
 
         self.trail.update_clause_references(&gc_map);
-        self.clauses.watch_lists.update_clause_references(&gc_map);
+
+        self.clauses.enable_watch_lists(false);
+        // TODO alternatively: self.clauses.watch_lists.update_clause_references(&gc_map);
 
         gc_map
     }

@@ -53,6 +53,29 @@ impl Clauses {
             ),
         }
     }
+
+    /// Enables or disables watch list maintanance.
+    ///
+    /// Enabling watch lists rebuilds them from the currently stored formula.
+    pub fn enable_watch_lists(&mut self, enabled: bool) {
+        if self.watch_lists.enabled != enabled {
+            self.watch_lists.enabled = enabled;
+            if enabled {
+                self.rebuild_watch_lists();
+            } else {
+                self.watch_lists.clear();
+            }
+        }
+    }
+
+    /// Rebuilds watch lists by watching all long clauses.
+    fn rebuild_watch_lists(&mut self) {
+        let mut clause_iter = None;
+        while let Some(clause) = self.long.next_clause(&mut clause_iter) {
+            let lits = self.long.lits(clause);
+            self.watch_lists.watch_clause(clause, [lits[0], lits[1]]);
+        }
+    }
 }
 
 impl TracksVarCount for Clauses {
@@ -128,9 +151,18 @@ pub struct Watch {
 /// detected, for each clause there either a) are two watched non-false literals, or b) there is a
 /// true literal. All this in such a way that undoing assignments during backtracking will maintain
 /// this invariant without moving any watches.
-#[derive(Default)]
 pub struct WatchLists {
     by_lit: Vec<Vec<Watch>>,
+    enabled: bool,
+}
+
+impl Default for WatchLists {
+    fn default() -> Self {
+        Self {
+            by_lit: vec![],
+            enabled: true,
+        }
+    }
 }
 
 impl WatchLists {
@@ -138,6 +170,10 @@ impl WatchLists {
     ///
     /// Note that the watched literals should always be the first two literals of a clause.
     pub fn watch_clause(&mut self, clause: ClauseRef, watched_lits: [Lit; 2]) {
+        if !self.enabled {
+            return;
+        }
+
         for i in 0..2 {
             let watched_lit = watched_lits[i];
             let blocking_lit = watched_lits[i ^ 1];
@@ -151,22 +187,26 @@ impl WatchLists {
     /// Returns the watch list for clauses containing the given literal, replacing it with an empty
     /// list.
     pub fn take(&mut self, lit: Lit) -> Vec<Watch> {
+        debug_assert!(self.enabled);
         take(&mut self.by_lit[lit.code()])
     }
 
     /// Restores a watch list that was temporarily taken using [`take`](Self::take).
     pub fn restore(&mut self, lit: Lit, watches: Vec<Watch>) {
+        debug_assert!(self.enabled);
         debug_assert!(self.by_lit[lit.code()].is_empty());
         self.by_lit[lit.code()] = watches;
     }
 
     /// Appends a single `Watch` to the watch list for a given literal.
     pub fn push_watch(&mut self, lit: Lit, watch: Watch) {
+        debug_assert!(self.enabled);
         self.by_lit[lit.code()].push(watch);
     }
 
     /// Updates refrence to long clauses after garbage collection.
     pub fn update_clause_references(&mut self, gc_map: &ClauseRefGcMap) {
+        debug_assert!(self.enabled);
         for watches in &mut self.by_lit {
             let mut scan = MutScan::new(watches);
             while let Some(mut watch) = scan.next() {
@@ -177,6 +217,17 @@ impl WatchLists {
                     watch.remove();
                 }
             }
+        }
+    }
+
+    /// Clears the contents of the watch lists.
+    ///
+    /// Only valid to call when watch lists are disabled.
+    pub fn clear(&mut self) {
+        debug_assert!(!self.enabled);
+
+        for watches in &mut self.by_lit {
+            watches.clear();
         }
     }
 }
