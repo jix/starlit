@@ -7,7 +7,8 @@ use crate::{
         Clauses,
     },
     glue::compute_glue,
-    lit::{Lit, Var},
+    lit::{Lit, LitIdx, Var},
+    minimize::MinimizeClause,
     trail::{BacktrackCallbacks, Reason, Step, Trail},
     unit_prop::UnitProp,
 };
@@ -54,6 +55,8 @@ pub struct ConflictAnalysis {
 
     /// Number of literals of the current decision level in the current conflicting clause.
     current_level_lit_count: usize,
+
+    minimize_clause: MinimizeClause,
 }
 
 impl ConflictAnalysis {
@@ -98,7 +101,16 @@ impl<'a> ConflictAnalysisOps<'a> {
         assert!(self.trail.decision_level() != 0);
         self.derive_1uip_clause(conflict, callbacks);
         callbacks.analyzed_conflict();
-        self.backtrack(callbacks);
+
+        // TODO make this configurable
+        let backtrack_level = if true {
+            self.minimize_derived_clause()
+        } else {
+            self.backtrack_level()
+        };
+
+        self.trail.backtrack_to_level(backtrack_level, callbacks);
+
         self.learn_and_propagate();
     }
 
@@ -132,12 +144,13 @@ impl<'a> ConflictAnalysisOps<'a> {
         });
     }
 
+    /// XXX
     /// Backtracks as far as possible for the derived clause to be propagating.
     ///
     /// This also reorders the literals of the derived clause such that after backtracking the first
     /// literal is unassigned and the second literal has the highest trail index of the remaining
     /// literals.
-    fn backtrack(&mut self, backtrack_callbacks: &mut impl BacktrackCallbacks) {
+    fn backtrack_level(&mut self) -> LitIdx {
         // Move the literal propagated after backtracing to index 0 (unit propagation invariant).
         let derived_clause_len = self.conflict_analysis.derived_clause.len();
         self.conflict_analysis
@@ -164,9 +177,7 @@ impl<'a> ConflictAnalysisOps<'a> {
 
             backtrack_level = self.trail.steps()[largest_trail_index].decision_level;
         }
-
-        self.trail
-            .backtrack_to_level(backtrack_level, backtrack_callbacks);
+        backtrack_level
     }
 
     /// Derives the 1-UIP clause from the implication graph and the given conflict.
@@ -310,6 +321,18 @@ impl<'a> ConflictAnalysisOps<'a> {
         let (data, lits) = long_clauses.data_and_lits_mut(clause);
         data.set_glue(compute_glue(trail, lits, tmp));
         data.set_used(data.used() + 1);
+    }
+
+    fn minimize_derived_clause(&mut self) -> LitIdx {
+        if self.conflict_analysis.derived_clause.len() > 1 {
+            self.conflict_analysis.minimize_clause.minimize(
+                &mut self.conflict_analysis.derived_clause,
+                &self.trail,
+                &self.clauses,
+            )
+        } else {
+            0
+        }
     }
 }
 

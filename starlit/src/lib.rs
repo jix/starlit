@@ -13,6 +13,7 @@ pub mod glue;
 pub mod heap;
 pub mod lit;
 pub mod luby;
+pub mod minimize;
 pub mod phases;
 pub mod reduce;
 pub mod search;
