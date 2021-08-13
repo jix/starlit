@@ -7,10 +7,11 @@ use crate::{
         Clauses,
     },
     glue::compute_glue,
-    lit::{Lit, LitIdx, Var},
+    lit::{Lit, Var},
     minimize::MinimizeClause,
-    trail::{BacktrackCallbacks, Reason, Step, Trail},
+    trail::{BacktrackCallbacks, DecisionLevel, Reason, Step, Trail, TrailIndex},
     unit_prop::UnitProp,
+    vec_map::VecMap,
 };
 
 /// Reference to a falsified clause.
@@ -42,10 +43,10 @@ pub struct ConflictAnalysis {
     /// This is initialized to the literals of the conflict clause and is modified by successively
     /// resolving it with the reason for falsifying a contained literal until an asserting 1-UIP
     /// clause is found.
-    current_clause_lits: Vec<bool>,
+    current_clause_lits: VecMap<TrailIndex, bool>,
 
     /// Temporary decision level flags for glue computation.
-    glue_level_flags: Vec<bool>,
+    glue_level_flags: VecMap<DecisionLevel, bool>,
 
     /// Literals of the final derived asserting clause.
     ///
@@ -62,17 +63,14 @@ pub struct ConflictAnalysis {
 impl ConflictAnalysis {
     /// Reserves enough buffer space for analyzing the current conflict.
     fn update_trail_len(&mut self, trail: &Trail) {
-        self.current_clause_lits.resize(
-            self.current_clause_lits.len().max(trail.steps().len()),
-            false,
-        );
+        let new_len = self.current_clause_lits.len().max(trail.steps().len());
+        self.current_clause_lits.resize(new_len, false);
 
-        self.glue_level_flags.resize(
-            self.glue_level_flags
-                .len()
-                .max(trail.decision_level() as usize + 1),
-            false,
-        );
+        let new_len = self
+            .glue_level_flags
+            .len()
+            .max(trail.decision_level().0 as usize + 1);
+        self.glue_level_flags.resize(new_len, false);
     }
 }
 
@@ -98,7 +96,7 @@ impl<'a> ConflictAnalysisOps<'a> {
         conflict: ConflictClause,
         callbacks: &mut impl ConflictAnalysisCallbacks,
     ) {
-        assert!(self.trail.decision_level() != 0);
+        assert_ne!(self.trail.decision_level(), DecisionLevel::TOP);
         self.derive_1uip_clause(conflict, callbacks);
         callbacks.analyzed_conflict();
 
@@ -150,14 +148,14 @@ impl<'a> ConflictAnalysisOps<'a> {
     /// This also reorders the literals of the derived clause such that after backtracking the first
     /// literal is unassigned and the second literal has the highest trail index of the remaining
     /// literals.
-    fn backtrack_level(&mut self) -> LitIdx {
+    fn backtrack_level(&mut self) -> DecisionLevel {
         // Move the literal propagated after backtracing to index 0 (unit propagation invariant).
         let derived_clause_len = self.conflict_analysis.derived_clause.len();
         self.conflict_analysis
             .derived_clause
             .swap(0, derived_clause_len - 1);
 
-        let mut backtrack_level = 0;
+        let mut backtrack_level = DecisionLevel::TOP;
 
         if derived_clause_len > 1 {
             // Of the remaining literals move the one with the largest trail index to index 1
@@ -214,7 +212,7 @@ impl<'a> ConflictAnalysisOps<'a> {
 
         // The initial conflict clause always has at leat two such literals as it would have
         // propageted at an earlier decision level otherwise.
-        for trail_index in (0..self.trail.steps().len()).rev() {
+        for trail_index in self.trail.steps().keys().rev() {
             // We identify the last assigned literal (by scanning the trail backwards) of the
             // current decision level contained in the current clause.
 
@@ -293,7 +291,7 @@ impl<'a> ConflictAnalysisOps<'a> {
         let lit_decision_level = trail.steps()[trail_index].decision_level;
         // If the literal is assigned at level zero, it is always falsified and we can directly
         // remove it.
-        if lit_decision_level == 0 {
+        if lit_decision_level == DecisionLevel::TOP {
             return;
         }
         // If the literal is already added, don't add it a second time.
@@ -316,14 +314,14 @@ impl<'a> ConflictAnalysisOps<'a> {
         trail: &Trail,
         long_clauses: &mut LongClauses,
         clause: ClauseRef,
-        tmp: &mut [bool],
+        tmp: &mut VecMap<DecisionLevel, bool>,
     ) {
         let (data, lits) = long_clauses.data_and_lits_mut(clause);
         data.set_glue(compute_glue(trail, lits, tmp));
         data.set_used(data.used() + 1);
     }
 
-    fn minimize_derived_clause(&mut self) -> LitIdx {
+    fn minimize_derived_clause(&mut self) -> DecisionLevel {
         if self.conflict_analysis.derived_clause.len() > 1 {
             self.conflict_analysis.minimize_clause.minimize(
                 &mut self.conflict_analysis.derived_clause,
@@ -331,7 +329,7 @@ impl<'a> ConflictAnalysisOps<'a> {
                 self.clauses,
             )
         } else {
-            0
+            DecisionLevel::TOP
         }
     }
 }

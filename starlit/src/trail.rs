@@ -7,14 +7,80 @@ use crate::{
         long::{ClauseRef, ClauseRefGcMap},
         AddedClause, Clauses,
     },
-    lit::{Lit, LitIdx, SignedLitIdx, Var},
+    lit::{Lit, LitIdx, Var},
     tracking::TracksVarCount,
-    vec_map::VecMap,
+    vec_map::{VecMap, VecMapIndex, VecMapKey},
 };
 
-// How I wish there was a `NotMaxU32` type or some other way to specify custom niche values...
-/// Marker for variables that are unassigned.
-const UNASSIGNED: SignedLitIdx = SignedLitIdx::MAX;
+/// A decision level.
+///
+/// Wrapper around `LitIdx` for better type safety.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
+pub struct DecisionLevel(pub LitIdx);
+
+impl DecisionLevel {
+    /// The top decision level that contains unconditional assignments.
+    pub const TOP: DecisionLevel = DecisionLevel(0);
+}
+
+impl std::fmt::Debug for DecisionLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.0, f)
+    }
+}
+
+impl VecMapIndex for DecisionLevel {
+    #[inline(always)]
+    fn vec_map_index(&self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl VecMapKey for DecisionLevel {
+    #[inline(always)]
+    fn vec_map_key_from_index(index: usize) -> Self {
+        Self(index as _)
+    }
+}
+
+/// A position on the trail.
+///
+/// When processing the implication graph it is often convenient to refer to literals by their
+/// position on the trail. Using this type instead of an integer make this more type safe and helps
+/// avoiding casts between `usize` and `LitIdx`.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
+pub struct TrailIndex(pub LitIdx);
+
+impl TrailIndex {
+    // How I wish there was a `NotMaxU32` type or some other way to specify custom niche values...
+    /// Marker for variables that are unassigned.
+    ///
+    /// Note that `Trail::trail_index` is only valid for assigned variables and is not guaranteed to
+    /// return this for unassigned variables.
+    pub const UNASSIGNED: TrailIndex = TrailIndex(LitIdx::MAX);
+}
+
+impl std::fmt::Debug for TrailIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.0, f)
+    }
+}
+
+impl VecMapIndex for TrailIndex {
+    #[inline(always)]
+    fn vec_map_index(&self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl VecMapKey for TrailIndex {
+    #[inline(always)]
+    fn vec_map_key_from_index(index: usize) -> Self {
+        Self(index as _)
+    }
+}
 
 /// The reason for an assignment, represents edges of the implication graph.
 #[derive(Eq, PartialEq, Debug)]
@@ -61,7 +127,7 @@ pub struct Step {
     /// The decision level of the `n`-th decision literal is `n`. For a propagated literal the
     /// decision level is the maximum decision level among the falsified literals in the propagating
     /// clause or zero if there are none.
-    pub decision_level: LitIdx,
+    pub decision_level: DecisionLevel,
     /// The propagating clause that assigned this literal.
     ///
     /// Used to represent the implication graph.
@@ -76,10 +142,10 @@ pub struct Trail {
     pub assigned: PartialAssignment,
 
     /// The step on which a variable was assigned.
-    trail_index: VecMap<Var, SignedLitIdx>,
+    trail_index: VecMap<Var, TrailIndex>,
 
     /// Sequence of performed steps.
-    steps: Vec<Step>,
+    steps: VecMap<TrailIndex, Step>,
 
     /// Trail indices of decisions.
     ///
@@ -94,7 +160,7 @@ impl Default for Trail {
         Trail {
             assigned: PartialAssignment::default(),
             trail_index: VecMap::default(),
-            steps: vec![],
+            steps: VecMap::default(),
             decisions: vec![0],
         }
     }
@@ -104,7 +170,7 @@ impl Default for Trail {
 impl Trail {
     /// Adds a step that assigns a literal to the trail.
     pub fn assign(&mut self, step: Step) {
-        self.trail_index[step.assigned_lit] = self.steps.len() as _;
+        self.trail_index[step.assigned_lit] = TrailIndex(self.steps.len() as _);
         debug_assert!(!self.assigned.is_assigned(step.assigned_lit.var()));
         self.assigned.assign(step.assigned_lit);
         self.steps.push(step);
@@ -121,7 +187,7 @@ impl Trail {
     }
 
     /// Returns the history of performed assignment steps.
-    pub fn steps(&self) -> &[Step] {
+    pub fn steps(&self) -> &VecMap<TrailIndex, Step> {
         &self.steps
     }
 
@@ -139,11 +205,10 @@ impl Trail {
     /// With debug assertions enabled, this will panic if the variable is not assigned by a step on
     /// the trail. For release builds, calling this for an unassigned variable might panic or return
     /// bogus data. It is memory safe in either case.
-    pub fn trail_index(&self, var: Var) -> usize {
+    pub fn trail_index(&self, var: Var) -> TrailIndex {
         let index = self.trail_index[var];
-        debug_assert_ne!(index, UNASSIGNED);
-        debug_assert!(index >= 0);
-        index as usize
+        debug_assert_ne!(index, TrailIndex::UNASSIGNED);
+        index
     }
 
     /// Returns the trail index of the decision literal of a given decision level.
@@ -155,8 +220,8 @@ impl Trail {
     }
 
     /// Number of decisions made.
-    pub fn decision_level(&self) -> LitIdx {
-        (self.decisions.len() - 1) as LitIdx
+    pub fn decision_level(&self) -> DecisionLevel {
+        DecisionLevel((self.decisions.len() - 1) as LitIdx)
     }
 
     /// Bactracks to a given decision level.
@@ -166,14 +231,14 @@ impl Trail {
     /// Panics if the target decision level is the current decision level or higher.
     pub fn backtrack_to_level(
         &mut self,
-        decision_level: LitIdx,
+        decision_level: DecisionLevel,
         callbacks: &mut impl BacktrackCallbacks,
     ) {
-        tracing::trace!(decision_level, "backtrack");
+        tracing::trace!(?decision_level, "backtrack");
         assert!(decision_level < self.decision_level());
 
         // Get the index corresponding to the lowest decision to undo
-        let target_trail_len = self.decisions[decision_level as usize + 1] as usize;
+        let target_trail_len = self.decisions[decision_level.0 as usize + 1] as usize;
 
         for step in self.steps.drain(target_trail_len..) {
             let lit = step.assigned_lit;
@@ -184,17 +249,17 @@ impl Trail {
             {
                 // In debug builds we mark unassigned literals in `trail_index` so that on invalid
                 // accesses we get a panic right away.
-                self.trail_index[lit] = UNASSIGNED;
+                self.trail_index[lit] = TrailIndex::UNASSIGNED;
             }
         }
 
-        self.decisions.truncate(decision_level as usize + 1);
+        self.decisions.truncate(decision_level.0 as usize + 1);
         callbacks.backtracked(self);
     }
 
     /// Updates refrence to long clauses after garbage collection.
     pub fn update_clause_references(&mut self, gc_map: &ClauseRefGcMap) {
-        for step in &mut self.steps {
+        for step in &mut *self.steps {
             if let Reason::Long(clause) = &mut step.reason {
                 *clause = gc_map.update(*clause).unwrap();
             }
@@ -221,7 +286,7 @@ impl TracksVarCount for Trail {
     fn set_var_count(&mut self, var_count: usize) {
         self.assigned.set_var_count(var_count);
 
-        self.trail_index.resize(var_count, UNASSIGNED)
+        self.trail_index.resize(var_count, TrailIndex::UNASSIGNED)
     }
 }
 

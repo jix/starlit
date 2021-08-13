@@ -6,7 +6,7 @@ use crate::{
     lit::{Lit, Var},
     phases::Phases,
     tracking::TracksVarCount,
-    trail::{BacktrackCallbacks, Trail},
+    trail::{BacktrackCallbacks, DecisionLevel, Trail},
     unit_prop::{UnitProp, UnitPropOps},
 };
 
@@ -54,7 +54,7 @@ impl Search {
         self.stats.propagations += (self.unit_prop.propagated - previously_propagated) as u64;
         if let Err(conflict) = prop_result {
             self.stats.conflicts += 1;
-            if self.trail.decision_level() == 0 {
+            if self.trail.decision_level() == DecisionLevel::TOP {
                 // Conflict without any assumptions means the formula is UNSAT
                 tracing::debug!("UNSAT");
                 return Some(false);
@@ -96,9 +96,9 @@ impl Search {
     /// Performs a restart by backtracking to decision level 0.
     pub fn restart(&mut self) {
         tracing::debug!("restart");
-        if self.trail.decision_level() > 0 {
+        if self.trail.decision_level() > DecisionLevel::TOP {
             self.trail.backtrack_to_level(
-                0,
+                DecisionLevel::TOP,
                 &mut Callbacks {
                     unit_prop: &mut self.unit_prop,
                     vsids: &mut self.vsids,
