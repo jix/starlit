@@ -7,6 +7,7 @@ use crate::{
     },
     lit::{Lit, LitIdx, SignedLitIdx, Var},
     tracking::TracksVarCount,
+    vec_map::VecMap,
 };
 
 // How I wish there was a `NotMaxU32` type or some other way to specify custom niche values...
@@ -76,7 +77,7 @@ pub struct Trail {
     pub assigned: PartialAssignment,
 
     /// The step on which a variable was assigned.
-    trail_index: Vec<SignedLitIdx>,
+    trail_index: VecMap<Var, SignedLitIdx>,
 
     /// Sequence of performed steps.
     steps: Vec<Step>,
@@ -93,7 +94,7 @@ impl Default for Trail {
     fn default() -> Self {
         Trail {
             assigned: PartialAssignment::default(),
-            trail_index: vec![],
+            trail_index: VecMap::default(),
             steps: vec![],
             decisions: vec![0],
         }
@@ -104,7 +105,7 @@ impl Default for Trail {
 impl Trail {
     /// Adds a step that assigns a literal to the trail.
     pub fn assign(&mut self, step: Step) {
-        self.trail_index[step.assigned_lit.index()] = self.steps.len() as _;
+        self.trail_index[step.assigned_lit] = self.steps.len() as _;
         debug_assert!(!self.assigned.is_assigned(step.assigned_lit.var()));
         self.assigned.assign(step.assigned_lit);
         self.steps.push(step);
@@ -140,7 +141,7 @@ impl Trail {
     /// the trail. For release builds, calling this for an unassigned variable might panic or return
     /// bogus data. It is memory safe in either case.
     pub fn trail_index(&self, var: Var) -> usize {
-        let index = self.trail_index[var.index()];
+        let index = self.trail_index[var];
         debug_assert_ne!(index, UNASSIGNED);
         debug_assert!(index >= 0);
         index as usize
@@ -184,7 +185,7 @@ impl Trail {
             {
                 // In debug builds we mark unassigned literals in `trail_index` so that on invalid
                 // accesses we get a panic right away.
-                self.trail_index[lit.index()] = UNASSIGNED;
+                self.trail_index[lit] = UNASSIGNED;
             }
         }
 
@@ -235,7 +236,7 @@ pub struct PartialAssignment {
     /// Stored as one byte per variable. Each byte corresponds to an `Option<bool>`, but we encode
     /// it manually to get better codegen. We use `0`, `1`, `2` for `Some(false)`, `Some(true)`,
     /// `None` respectively.
-    assigned: Vec<u8>,
+    assigned: VecMap<Var, u8>,
 }
 
 impl PartialAssignment {
@@ -244,31 +245,31 @@ impl PartialAssignment {
     /// A variable can be assigned `false` by assigning `true` to the negated literal.
     #[inline(always)]
     pub fn assign(&mut self, lit: Lit) {
-        self.assigned[lit.index()] = lit.is_positive() as u8
+        self.assigned[lit] = lit.is_positive() as u8
     }
 
     /// Removes any assigned value from a variable.
     #[inline(always)]
     pub fn unassign(&mut self, var: Var) {
-        self.assigned[var.index()] = 2
+        self.assigned[var] = 2
     }
 
     /// Returns `true` if the literal is assigned `true`.
     #[inline(always)]
     pub fn is_true(&self, lit: Lit) -> bool {
-        self.assigned[lit.index()] == lit.is_positive() as u8
+        self.assigned[lit] == lit.is_positive() as u8
     }
 
     /// Returns `true` if the literal is assigned `false`.
     #[inline(always)]
     pub fn is_false(&self, lit: Lit) -> bool {
-        self.assigned[lit.index()] == lit.is_negative() as u8
+        self.assigned[lit] == lit.is_negative() as u8
     }
 
     /// Returns `true` if the literal is assigned.
     #[inline(always)]
     pub fn is_assigned(&self, var: Var) -> bool {
-        self.assigned[var.index()] != 2
+        self.assigned[var] != 2
     }
 }
 

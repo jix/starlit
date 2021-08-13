@@ -4,13 +4,14 @@ use crate::{
     lit::{Lit, Var},
     tracking::TracksVarCount,
     trail::BacktrackCallbacks,
+    vec_map::VecMap,
 };
 
 /// Saves previously assigned phases to reuse them for decisions.
 #[derive(Default)]
 pub struct Phases {
     /// Saved phases.
-    saved: Vec<bool>,
+    saved: VecMap<Var, bool>,
 }
 
 impl TracksVarCount for Phases {
@@ -28,7 +29,7 @@ impl BacktrackCallbacks for Phases {
         // We update the saved phases when undoing assignments, as this is more convenient than
         // doing so during propagation. As we're only accessing the saved phases of unassigned
         // literals, this makes no logical difference to updating them when they are assigned.
-        self.saved[lit.index()] = lit.is_positive();
+        self.saved[lit] = lit.is_positive();
     }
 }
 
@@ -37,6 +38,6 @@ impl Phases {
     ///
     /// The returned literal has the argument as variable.
     pub fn decide_phase(&self, var: Var) -> Lit {
-        Lit::from_var(var, self.saved[var.index()])
+        Lit::from_var(var, self.saved[var])
     }
 }

@@ -1,7 +1,10 @@
 //! Addressable heaps.
 use std::{mem::swap, ops::Index};
 
-use crate::lit::LitIdx;
+use crate::{
+    lit::LitIdx,
+    vec_map::{VecMapIndex, VecMapKey},
+};
 
 /// Addressable max heap.
 ///
@@ -10,18 +13,20 @@ use crate::lit::LitIdx;
 /// Implemented as a binary heap of indices with an extra array that tracks each index's position in
 /// the heap.
 #[derive(Debug)]
-pub struct MaxHeap<V> {
-    values: Vec<V>,
+pub struct MaxHeap<Key, Value> {
+    values: Vec<Value>,
     heap_pos: Vec<LitIdx>,
     heap: Vec<LitIdx>,
+    _marker: std::marker::PhantomData<Key>,
 }
 
-impl<V> Default for MaxHeap<V> {
+impl<Key, Value> Default for MaxHeap<Key, Value> {
     fn default() -> Self {
         Self {
             values: vec![],
             heap_pos: vec![],
             heap: vec![],
+            _marker: std::marker::PhantomData,
         }
     }
 }
@@ -35,25 +40,43 @@ macro_rules! swap {
     };
 }
 
-impl<V: Ord> MaxHeap<V> {
+impl<Key, Value> MaxHeap<Key, Value>
+where
+    Value: Ord,
+{
     /// Resize the array of values, using the given value to initalize new values.
     ///
     /// This does not enqueue indices when growing, but will dequeue removed indices when
     /// shrinking.
-    pub fn resize(&mut self, len: usize, value: V)
+    pub fn resize(&mut self, len: usize, value: Value)
     where
-        V: Clone,
+        Value: Clone,
     {
         assert!(len <= (LitIdx::MAX as usize) + 1);
 
         if len < self.values.len() {
             for index in len..self.values.len() {
-                self.dequeue(index);
+                self.dequeue_usize(index);
             }
         }
 
         self.values.resize(len, value);
         self.heap_pos.resize(len, !0);
+    }
+
+    /// Resize the array of values, enqueuing new values.
+    ///
+    /// This is equaivalent to [`resize`](Self::resize) followed by an [`enqueue`](Self::enqueue)
+    /// for every newly added value.
+    pub fn resize_enqueued(&mut self, len: usize, value: Value)
+    where
+        Value: Clone,
+    {
+        let old_len = self.len();
+        self.resize(len, value);
+        for index in old_len..len {
+            self.enqueue_usize(index);
+        }
     }
 
     /// Returns the size of the array of values.
@@ -70,7 +93,12 @@ impl<V: Ord> MaxHeap<V> {
     /// Dequeue the index.
     ///
     /// No-op when the index was not enqueued.
-    pub fn dequeue(&mut self, index: usize) {
+    #[inline(always)]
+    pub fn dequeue(&mut self, index: impl VecMapIndex<Key>) {
+        self.dequeue_usize(index.vec_map_index())
+    }
+
+    fn dequeue_usize(&mut self, index: usize) {
         let mut pos = self.heap_pos[index] as usize;
         if pos >= self.heap.len() {
             return;
@@ -98,7 +126,12 @@ impl<V: Ord> MaxHeap<V> {
     /// Enqueue the index.
     ///
     /// No-op when the index is already enqueued.
-    pub fn enqueue(&mut self, index: usize) {
+    #[inline(always)]
+    pub fn enqueue(&mut self, index: impl VecMapIndex<Key>) {
+        self.enqueue_usize(index.vec_map_index())
+    }
+
+    fn enqueue_usize(&mut self, index: usize) {
         let mut pos = self.heap_pos[index] as usize;
         if pos < self.heap.len() {
             return;
@@ -112,7 +145,10 @@ impl<V: Ord> MaxHeap<V> {
     }
 
     /// Dequeue and return the index with the largest value.
-    pub fn pop_max(&mut self) -> Option<usize> {
+    pub fn pop_max(&mut self) -> Option<Key>
+    where
+        Key: VecMapKey,
+    {
         if self.heap.is_empty() {
             return None;
         }
@@ -135,7 +171,7 @@ impl<V: Ord> MaxHeap<V> {
             self.move_towards_leaves(other_pos)
         }
 
-        Some(index)
+        Some(Key::vec_map_key_from_index(index))
     }
 
     /// Move value at `pos` towards the root until it stops having a smaller parent.
@@ -190,7 +226,12 @@ impl<V: Ord> MaxHeap<V> {
     ///
     /// Can be called whether the index is enqueued or not. The passed function may not decrease the
     /// given value. (Doing so is memory safe, but breaks internal invariants.)
-    pub fn increase(&mut self, index: usize, f: impl FnOnce(&mut V)) {
+    #[inline(always)]
+    pub fn increase(&mut self, index: impl VecMapIndex<Key>, f: impl FnOnce(&mut Value)) {
+        self.increase_usize(index.vec_map_index(), f)
+    }
+
+    fn increase_usize(&mut self, index: usize, f: impl FnOnce(&mut Value)) {
         f(&mut self.values[index]);
 
         let pos = self.heap_pos[index] as usize;
@@ -203,18 +244,21 @@ impl<V: Ord> MaxHeap<V> {
     ///
     /// Passing a function that is not weakly monotone, is not allowed.  (Doing so is memory safe,
     /// but breaks internal invariants.)
-    pub fn apply_monotone(&mut self, f: impl Fn(&mut V)) {
+    pub fn apply_monotone(&mut self, f: impl Fn(&mut Value)) {
         for value in &mut self.values {
             f(value);
         }
     }
 }
 
-impl<V> Index<usize> for MaxHeap<V> {
-    type Output = V;
+impl<Key, Value, I> Index<I> for MaxHeap<Key, Value>
+where
+    I: VecMapIndex<Key>,
+{
+    type Output = Value;
 
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.values[index]
+    fn index(&self, index: I) -> &Self::Output {
+        &self.values[index.vec_map_index()]
     }
 }
 
@@ -224,7 +268,7 @@ mod tests {
 
     #[test]
     fn enqueue_some_increase_pop() {
-        let mut heap = MaxHeap::<usize>::default();
+        let mut heap = MaxHeap::<usize, usize>::default();
 
         heap.resize(10, 0);
 
