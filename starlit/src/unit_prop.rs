@@ -38,7 +38,7 @@ impl<'a> UnitPropOps<'a> {
     pub fn propagate(&mut self) -> Result<(), ConflictClause> {
         self.clauses.enable_watch_lists(true);
         while self.unit_prop.propagated < self.trail.steps().len() {
-            self.propagate_literal(self.trail.steps()[self.unit_prop.propagated].assigned_lit)?;
+            self.propagate_literal((**self.trail.steps())[self.unit_prop.propagated].assigned_lit)?;
             self.unit_prop.propagated += 1;
         }
         Ok(())
@@ -69,7 +69,7 @@ impl<'a> UnitPropOps<'a> {
                         assigned_lit: other_lit,
                         decision_level: self.trail.decision_level(),
                         reason: Reason::Binary(clause_lit),
-                    })
+                    });
                 }
             }
         }

@@ -1,7 +1,7 @@
 use starlit::{
     clauses::long::SolverClauseData,
     tracking::TracksVarCount,
-    trail::{Reason, Step},
+    trail::{DecisionLevel, Reason, Step},
 };
 
 fn main() -> anyhow::Result<()> {
@@ -58,7 +58,7 @@ fn main() -> anyhow::Result<()> {
         }
         solver.search.trail.assign(Step {
             assigned_lit: unit,
-            decision_level: 0,
+            decision_level: DecisionLevel::TOP,
             reason: Reason::Unit,
         });
     }

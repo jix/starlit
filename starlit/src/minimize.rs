@@ -19,8 +19,9 @@ use std::mem::take;
 
 use crate::{
     clauses::Clauses,
-    lit::{Lit, LitIdx},
-    trail::Trail,
+    lit::Lit,
+    trail::{DecisionLevel, Trail, TrailIndex},
+    vec_map::VecMap,
 };
 
 /// Temporary data used during clause minimization.
@@ -29,12 +30,12 @@ pub struct MinimizeClause {
     /// Trail index of the first clause literal for each level.
     ///
     /// `LitIdx::MAX` if there is is no such literal, or if the level is yet to be processed.
-    first_on_level: Vec<LitIdx>,
+    first_on_level: VecMap<DecisionLevel, TrailIndex>,
     /// Cache of whether a literal (by trail index) has a known redundancy wrt to the already
     /// processed clause literals.
-    cache: Vec<Option<bool>>,
+    cache: VecMap<TrailIndex, Option<bool>>,
     /// Indices of values set in `cache`.
-    to_clean: Vec<LitIdx>,
+    to_clean: Vec<TrailIndex>,
     /// Stack for the iterative DFS fallback.
     ///
     /// Always empty between calls, only here to cache the allocation.
@@ -45,11 +46,18 @@ impl MinimizeClause {
     /// Removes redundant literals from a clause derived during conflict analysis.
     ///
     /// Returns the backtracking level that makes the clause propagating.
-    pub fn minimize(&mut self, clause: &mut Vec<Lit>, trail: &Trail, clauses: &Clauses) -> LitIdx {
+    pub fn minimize(
+        &mut self,
+        clause: &mut Vec<Lit>,
+        trail: &Trail,
+        clauses: &Clauses,
+    ) -> DecisionLevel {
         // Resize temporary buffers if necessary
-        if self.first_on_level.len() <= trail.decision_level() as usize {
-            self.first_on_level
-                .resize(trail.decision_level() as usize + 1, LitIdx::MAX);
+        if self.first_on_level.len() <= trail.decision_level().0 as usize {
+            self.first_on_level.resize(
+                trail.decision_level().0 as usize + 1,
+                TrailIndex::UNASSIGNED,
+            );
         }
 
         if self.cache.len() <= trail.steps().len() {
@@ -63,10 +71,10 @@ impl MinimizeClause {
 
         clause.retain(|&lit| {
             let index = trail.trail_index(lit.var());
-            let level = trail.steps()[index].decision_level as usize;
-            let retain = if self.first_on_level[level] as usize > index {
+            let level = trail.steps()[index].decision_level;
+            let retain = if self.first_on_level[level] > index {
                 // The first literal of each decision level in the clause cannot be redundant
-                self.first_on_level[level] = index as LitIdx;
+                self.first_on_level[level] = index;
                 true
             } else {
                 !self.is_redundant_literal_index_rec(index, trail, clauses, 0)
@@ -75,7 +83,7 @@ impl MinimizeClause {
             // After retaining a literal, it is redundant wrt to the retained literals even if it
             // wasn't before.
             self.cache[index] = Some(true);
-            self.to_clean.push(index as LitIdx);
+            self.to_clean.push(index);
             retain
         });
 
@@ -83,14 +91,14 @@ impl MinimizeClause {
 
         // Clean up temporary buffers for the next minimization
         for index in self.to_clean.drain(..) {
-            self.cache[index as usize] = None;
+            self.cache[index] = None;
         }
 
         for &lit in clause.iter() {
             let index = trail.trail_index(lit.var());
-            let level = trail.steps()[index].decision_level as usize;
+            let level = trail.steps()[index].decision_level;
 
-            self.first_on_level[level] = LitIdx::MAX;
+            self.first_on_level[level] = TrailIndex::UNASSIGNED;
         }
 
         // Reverse the clause so the propagated literal is first and a literal of the backtrack
@@ -103,13 +111,17 @@ impl MinimizeClause {
     ///
     /// Trivial cases are top-level assignments, which are always redundant, and assignments that
     /// precede all clause literals on the same level, which are never redundant.
-    fn is_redundant_literal_index_cached(&mut self, index: usize, trail: &Trail) -> Option<bool> {
+    fn is_redundant_literal_index_cached(
+        &mut self,
+        index: TrailIndex,
+        trail: &Trail,
+    ) -> Option<bool> {
         let step = &trail.steps()[index];
-        let level = step.decision_level as usize;
-        if level == 0 {
+        let level = step.decision_level;
+        if level == DecisionLevel::TOP {
             // Top level assignments are always implied
             Some(true)
-        } else if self.first_on_level[level] as usize > index {
+        } else if self.first_on_level[level] > index {
             // Assignments before the first clause literal on the same level cannot be implied by
             // clause literals. This includes literals on levels with no clause literals.
 
@@ -127,7 +139,7 @@ impl MinimizeClause {
     /// This caches positive as well as negative results to ensure an overall linear runtime.
     fn is_redundant_literal_index_rec(
         &mut self,
-        index: usize,
+        index: TrailIndex,
         trail: &Trail,
         clauses: &Clauses,
         depth: usize,
@@ -147,7 +159,7 @@ impl MinimizeClause {
             match self.is_redundant_literal_index_cached(reason_index, trail) {
                 Some(false) => {
                     self.cache[index] = Some(false);
-                    self.to_clean.push(index as LitIdx);
+                    self.to_clean.push(index);
                     return false;
                 }
                 Some(true) => (),
@@ -168,14 +180,14 @@ impl MinimizeClause {
                 let reason_index = trail.trail_index(reason_lit.var());
                 if !self.is_redundant_literal_index_rec(reason_index, trail, clauses, depth + 1) {
                     self.cache[index] = Some(false);
-                    self.to_clean.push(index as LitIdx);
+                    self.to_clean.push(index);
                     return false;
                 }
             }
         }
 
         self.cache[index] = Some(true);
-        self.to_clean.push(index as LitIdx);
+        self.to_clean.push(index);
         true
     }
 
@@ -183,7 +195,7 @@ impl MinimizeClause {
     #[cold] // Only used as fallback
     fn is_redundant_literal_index_iter(
         &mut self,
-        index: usize,
+        index: TrailIndex,
         reason_lits: &[Lit],
         trail: &Trail,
         clauses: &Clauses,
@@ -203,7 +215,7 @@ impl MinimizeClause {
             () => {
                 for item in stack.drain(..) {
                     self.cache[item.index] = Some(false);
-                    self.to_clean.push(item.index as LitIdx);
+                    self.to_clean.push(item.index);
                 }
 
                 self.stack = unsafe {
@@ -230,7 +242,7 @@ impl MinimizeClause {
 
                     Some(false) => {
                         self.cache[top.index] = Some(false);
-                        self.to_clean.push(top.index as LitIdx);
+                        self.to_clean.push(top.index);
                         return_false!();
                     }
                     None => {
@@ -241,9 +253,9 @@ impl MinimizeClause {
                             match self.is_redundant_literal_index_cached(reason_index, trail) {
                                 Some(false) => {
                                     self.cache[index] = Some(false);
-                                    self.to_clean.push(index as LitIdx);
+                                    self.to_clean.push(index);
                                     self.cache[top.index] = Some(false);
-                                    self.to_clean.push(top.index as LitIdx);
+                                    self.to_clean.push(top.index);
                                     return_false!();
                                 }
                                 Some(true) => (),
@@ -252,7 +264,7 @@ impl MinimizeClause {
                         }
                         if all_true {
                             self.cache[index] = Some(true);
-                            self.to_clean.push(index as LitIdx);
+                            self.to_clean.push(index);
                         } else {
                             stack.push(std::mem::replace(
                                 &mut top,
@@ -263,7 +275,7 @@ impl MinimizeClause {
                 }
             }
             self.cache[top.index] = Some(true);
-            self.to_clean.push(top.index as LitIdx);
+            self.to_clean.push(top.index);
             if let Some(new_top) = stack.pop() {
                 top = new_top;
             } else {
@@ -284,7 +296,7 @@ impl MinimizeClause {
 #[derive(Debug)]
 struct StackItem<'a> {
     /// Trail index of the current literal.
-    index: usize,
+    index: TrailIndex,
     /// Pending (not yet visited) reason literals for the current literal.
     reason_lits: &'a [Lit],
 }
