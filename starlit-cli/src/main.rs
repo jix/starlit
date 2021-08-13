@@ -10,7 +10,7 @@ fn main() -> anyhow::Result<()> {
         .with_level(true)
         .with_target(true)
         .with_env_filter(tracing_subscriber::EnvFilter::new(
-            std::env::var("STARLIT_LOG").as_deref().unwrap_or(&"info"),
+            std::env::var("STARLIT_LOG").as_deref().unwrap_or("info"),
         ))
         .init();
 
@@ -45,7 +45,7 @@ fn main() -> anyhow::Result<()> {
             solver
                 .search
                 .clauses
-                .add_clause(SolverClauseData::new_input_clause(), &clause);
+                .add_clause(SolverClauseData::new_input_clause(), clause);
         }
     }
 

@@ -122,7 +122,7 @@ impl<'a> ConflictAnalysisOps<'a> {
             let mut clause_data = SolverClauseData::new_learned_clause();
 
             clause_data.set_glue(compute_glue(
-                &self.trail,
+                self.trail,
                 &self.conflict_analysis.derived_clause[1..],
                 &mut self.conflict_analysis.glue_level_flags,
             ));
@@ -191,20 +191,20 @@ impl<'a> ConflictAnalysisOps<'a> {
     ) {
         self.conflict_analysis.derived_clause.clear();
 
-        self.conflict_analysis.update_trail_len(&self.trail);
+        self.conflict_analysis.update_trail_len(self.trail);
 
         // Here we learn a new 1-UIP clause from the conflict
 
         // We start with the conflict clause itself:
         if let ConflictClause::Long(conflict) = conflict {
             Self::bump_long_clause(
-                &self.trail,
+                self.trail,
                 &mut self.clauses.long,
                 conflict,
                 &mut self.conflict_analysis.glue_level_flags,
             );
         }
-        for &lit in conflict.lits(&self.clauses) {
+        for &lit in conflict.lits(self.clauses) {
             Self::add_literal(&mut self.conflict_analysis, self.trail, lit, callbacks);
         }
 
@@ -253,7 +253,7 @@ impl<'a> ConflictAnalysisOps<'a> {
                 // literals to get the resolvent.
                 if let Reason::Long(reason) = step.reason {
                     Self::bump_long_clause(
-                        &self.trail,
+                        self.trail,
                         &mut self.clauses.long,
                         reason,
                         &mut self.conflict_analysis.glue_level_flags,
@@ -327,8 +327,8 @@ impl<'a> ConflictAnalysisOps<'a> {
         if self.conflict_analysis.derived_clause.len() > 1 {
             self.conflict_analysis.minimize_clause.minimize(
                 &mut self.conflict_analysis.derived_clause,
-                &self.trail,
-                &self.clauses,
+                self.trail,
+                self.clauses,
             )
         } else {
             0
