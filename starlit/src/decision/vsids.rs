@@ -54,7 +54,7 @@ pub struct Vsids {
     /// Variable activity.
     ///
     /// Actually stored as `f32`s, but always positive so we can compare them as `u32`s.
-    activity: MaxHeap<u32>,
+    activity: MaxHeap<Var, u32>,
     /// Amount to increase the activity of a bumped variable.
     increment: f32,
 }
@@ -70,7 +70,7 @@ impl Default for Vsids {
 
 impl BacktrackCallbacks for Vsids {
     fn unassign(&mut self, lit: crate::lit::Lit) {
-        self.activity.enqueue(lit.index())
+        self.activity.enqueue(lit)
     }
 }
 
@@ -80,11 +80,7 @@ impl TracksVarCount for Vsids {
     }
 
     fn set_var_count(&mut self, var_count: usize) {
-        let old_var_count = self.var_count();
-        self.activity.resize(var_count, 0);
-        for index in old_var_count..var_count {
-            self.activity.enqueue(index);
-        }
+        self.activity.resize_enqueued(var_count, 0);
     }
 }
 
@@ -95,7 +91,7 @@ impl Vsids {
 
         let increment = self.increment;
 
-        self.activity.increase(var.index(), |activity_bits| {
+        self.activity.increase(var, |activity_bits| {
             let mut activity = f32::from_bits(*activity_bits);
 
             activity += increment;
@@ -124,8 +120,7 @@ impl Vsids {
     pub fn pop_decision_var(&mut self, assignment: &PartialAssignment) -> Option<Var> {
         // Assigned variables are not eagerly removed from the heap, so we pop variables until we
         // find an unassigned variable.
-        while let Some(index) = self.activity.pop_max() {
-            let var = Var::from_index(index);
+        while let Some(var) = self.activity.pop_max() {
             if !assignment.is_assigned(var) {
                 return Some(var);
             }

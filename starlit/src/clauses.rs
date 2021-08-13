@@ -3,7 +3,7 @@ use std::mem::take;
 
 use long::{ClauseRef, LongClauses, SolverClauseData};
 
-use crate::{lit::Lit, tracking::TracksVarCount, util::mut_scan::MutScan};
+use crate::{lit::Lit, tracking::TracksVarCount, util::mut_scan::MutScan, vec_map::VecMap};
 
 use self::long::ClauseRefGcMap;
 
@@ -92,7 +92,7 @@ impl TracksVarCount for Clauses {
 /// Storage for binary clauses.
 #[derive(Default)]
 pub struct BinaryClauses {
-    by_lit: Vec<Vec<Lit>>,
+    by_lit: VecMap<Lit, Vec<Lit>>,
 }
 
 impl BinaryClauses {
@@ -101,7 +101,7 @@ impl BinaryClauses {
         for i in 0..2 {
             let watched_lit = clause_lits[i];
             let implied_lit = clause_lits[i ^ 1];
-            self.by_lit[watched_lit.code()].push(implied_lit);
+            self.by_lit[watched_lit].push(implied_lit);
         }
     }
 
@@ -109,7 +109,7 @@ impl BinaryClauses {
     ///
     /// A clause is represented by a single literal; the other literal of the clause.
     pub fn containing(&self, lit: Lit) -> &[Lit] {
-        &self.by_lit[lit.code()]
+        &self.by_lit[lit]
     }
 }
 
@@ -152,14 +152,14 @@ pub struct Watch {
 /// true literal. All this in such a way that undoing assignments during backtracking will maintain
 /// this invariant without moving any watches.
 pub struct WatchLists {
-    by_lit: Vec<Vec<Watch>>,
+    by_lit: VecMap<Lit, Vec<Watch>>,
     enabled: bool,
 }
 
 impl Default for WatchLists {
     fn default() -> Self {
         Self {
-            by_lit: vec![],
+            by_lit: VecMap::default(),
             enabled: true,
         }
     }
@@ -177,7 +177,7 @@ impl WatchLists {
         for i in 0..2 {
             let watched_lit = watched_lits[i];
             let blocking_lit = watched_lits[i ^ 1];
-            self.by_lit[watched_lit.code()].push(Watch {
+            self.by_lit[watched_lit].push(Watch {
                 clause,
                 blocking_lit,
             });
@@ -188,26 +188,26 @@ impl WatchLists {
     /// list.
     pub fn take(&mut self, lit: Lit) -> Vec<Watch> {
         debug_assert!(self.enabled);
-        take(&mut self.by_lit[lit.code()])
+        take(&mut self.by_lit[lit])
     }
 
     /// Restores a watch list that was temporarily taken using [`take`](Self::take).
     pub fn restore(&mut self, lit: Lit, watches: Vec<Watch>) {
         debug_assert!(self.enabled);
-        debug_assert!(self.by_lit[lit.code()].is_empty());
-        self.by_lit[lit.code()] = watches;
+        debug_assert!(self.by_lit[lit].is_empty());
+        self.by_lit[lit] = watches;
     }
 
     /// Appends a single `Watch` to the watch list for a given literal.
     pub fn push_watch(&mut self, lit: Lit, watch: Watch) {
         debug_assert!(self.enabled);
-        self.by_lit[lit.code()].push(watch);
+        self.by_lit[lit].push(watch);
     }
 
     /// Updates refrence to long clauses after garbage collection.
     pub fn update_clause_references(&mut self, gc_map: &ClauseRefGcMap) {
         debug_assert!(self.enabled);
-        for watches in &mut self.by_lit {
+        for watches in &mut *self.by_lit {
             let mut scan = MutScan::new(watches);
             while let Some(mut watch) = scan.next() {
                 if let Some(clause) = gc_map.update(watch.clause) {
@@ -226,7 +226,7 @@ impl WatchLists {
     pub fn clear(&mut self) {
         debug_assert!(!self.enabled);
 
-        for watches in &mut self.by_lit {
+        for watches in &mut *self.by_lit {
             watches.clear();
         }
     }

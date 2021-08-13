@@ -2,6 +2,8 @@
 
 use std::{fmt, ops};
 
+use crate::vec_map::{VecMapIndex, VecMapKey};
+
 /// The backing type used to represent literals and variables.
 pub type LitIdx = u32;
 
@@ -96,6 +98,20 @@ impl Var {
     #[inline]
     pub fn dimacs(self) -> isize {
         (self.index + 1) as isize
+    }
+}
+
+impl VecMapKey for Var {
+    #[inline(always)]
+    fn vec_map_key_from_index(index: usize) -> Self {
+        Self::from_index(index)
+    }
+}
+
+impl VecMapIndex for Var {
+    #[inline(always)]
+    fn vec_map_index(&self) -> usize {
+        self.index()
     }
 }
 
@@ -267,6 +283,27 @@ impl Lit {
         Lit {
             code: self.code ^ a.code ^ b.code,
         }
+    }
+}
+
+impl VecMapKey for Lit {
+    #[inline(always)]
+    fn vec_map_key_from_index(index: usize) -> Self {
+        Self::from_code(index)
+    }
+}
+
+impl VecMapIndex for Lit {
+    #[inline(always)]
+    fn vec_map_index(&self) -> usize {
+        self.code()
+    }
+}
+
+impl VecMapIndex<Var> for Lit {
+    #[inline(always)]
+    fn vec_map_index(&self) -> usize {
+        self.index()
     }
 }
 

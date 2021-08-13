@@ -21,3 +21,4 @@ pub mod solver;
 pub mod tracking;
 pub mod trail;
 pub mod unit_prop;
+pub mod vec_map;
