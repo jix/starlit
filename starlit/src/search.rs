@@ -123,9 +123,9 @@ impl Search {
 
         self.trail.update_clause_references(&gc_map);
 
-        self.clauses.enable_watch_lists(false);
-        // TODO alternatively: self.clauses.watch_lists.update_clause_references(&gc_map);
-
+        self.clauses.watch_lists.update_clause_references(&gc_map);
+        // TODO alternatively:
+        // self.clauses.enable_watch_lists(false);
         gc_map
     }
 }
