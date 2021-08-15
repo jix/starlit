@@ -60,6 +60,8 @@ impl MinimizeClause {
             );
         }
 
+        self.first_on_level[DecisionLevel::TOP] = TrailIndex(0);
+
         if self.cache.len() <= trail.steps().len() {
             self.cache.resize(trail.steps().len(), None);
         }
@@ -77,7 +79,7 @@ impl MinimizeClause {
                 self.first_on_level[level] = index;
                 true
             } else {
-                !self.is_redundant_literal_index_rec(index, trail, clauses, 0)
+                !self.is_redundant_literal_index_rec_uncached(index, trail, clauses, 0)
             };
 
             // After retaining a literal, it is redundant wrt to the retained literals even if it
@@ -116,21 +118,23 @@ impl MinimizeClause {
         index: TrailIndex,
         trail: &Trail,
     ) -> Option<bool> {
-        let step = &trail.steps()[index];
-        let level = step.decision_level;
-        if level == DecisionLevel::TOP {
-            // Top level assignments are always implied
-            Some(true)
-        } else if self.first_on_level[level] > index {
-            // Assignments before the first clause literal on the same level cannot be implied by
-            // clause literals. This includes literals on levels with no clause literals.
+        self.cache[index].or_else(|| {
+            let step = &trail.steps()[index];
+            let level = step.decision_level;
+            if self.first_on_level[level] > index {
+                // Assignments before the first clause literal on the same level cannot be implied
+                // by clause literals. This includes literals on levels with no clause literals.
 
-            // This combines all three "Poison Criteria", as well as the decision check of ["Efficient All-UIP Learned Clause
-            // Minimization"](https://doi.org/10.1007/978-3-030-80223-3_12) into a single check.
-            Some(false)
-        } else {
-            self.cache[index]
-        }
+                // This combines all three "Poison Criteria", as well as the decision check of
+                // ["Efficient All-UIP Learned Clause
+                // Minimization"](https://doi.org/10.1007/978-3-030-80223-3_12) into a single check.
+                Some(false)
+            } else if level == DecisionLevel::TOP {
+                Some(true)
+            } else {
+                None
+            }
+        })
     }
 
     /// Performs a depth-first search with lookahead to check whether the assignment at trail
@@ -148,7 +152,18 @@ impl MinimizeClause {
         if let Some(cached) = self.is_redundant_literal_index_cached(index, trail) {
             return cached;
         }
+        self.is_redundant_literal_index_rec_uncached(index, trail, clauses, depth)
+    }
 
+    /// The same as `is_redundant_literal_index_rec`, but does not perform a cache lookup for the
+    /// outermost call.
+    fn is_redundant_literal_index_rec_uncached(
+        &mut self,
+        index: TrailIndex,
+        trail: &Trail,
+        clauses: &Clauses,
+        depth: usize,
+    ) -> bool {
         let reason_lits = trail.steps()[index].reason.lits(clauses);
 
         // We perform a lookahead using cached/trivial values of depth 1 and only recurse if that is
