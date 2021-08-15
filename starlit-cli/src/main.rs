@@ -1,8 +1,12 @@
+use mimalloc::MiMalloc;
 use starlit::{
     clauses::long::SolverClauseData,
     tracking::TracksVarCount,
     trail::{DecisionLevel, Reason, Step},
 };
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
