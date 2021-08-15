@@ -104,7 +104,7 @@ impl<'a> ConflictAnalysisOps<'a> {
         let backtrack_level = if true {
             self.minimize_derived_clause()
         } else {
-            self.backtrack_level()
+            self.prepare_for_backtracking()
         };
 
         self.trail.backtrack_to_level(backtrack_level, callbacks);
@@ -142,13 +142,12 @@ impl<'a> ConflictAnalysisOps<'a> {
         });
     }
 
-    /// XXX
-    /// Backtracks as far as possible for the derived clause to be propagating.
+    /// Determines the backtrack level required for the derived clause to be propagating.
     ///
     /// This also reorders the literals of the derived clause such that after backtracking the first
     /// literal is unassigned and the second literal has the highest trail index of the remaining
     /// literals.
-    fn backtrack_level(&mut self) -> DecisionLevel {
+    fn prepare_for_backtracking(&mut self) -> DecisionLevel {
         // Move the literal propagated after backtracing to index 0 (unit propagation invariant).
         let derived_clause_len = self.conflict_analysis.derived_clause.len();
         self.conflict_analysis
