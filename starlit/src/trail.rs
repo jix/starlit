@@ -1,5 +1,7 @@
 //! Stores a history of steps performed during the search to enable backtracking.
 
+use core::slice;
+
 use crate::{
     clauses::{
         long::{ClauseRef, ClauseRefGcMap},
@@ -31,10 +33,7 @@ impl Reason {
     pub fn lits<'a>(&'a self, clauses: &'a Clauses) -> &'a [Lit] {
         match self {
             Reason::Decision | Reason::Unit => &[],
-            Reason::Binary(lit) => unsafe {
-                // SAFETY `T` and `[T;1]` have the same size and alignment
-                &*(lit as *const Lit as *const [Lit; 1])
-            },
+            Reason::Binary(lit) => slice::from_ref(lit),
             Reason::Long(clause) => {
                 // Unit propagation ensures that the falsified literals are contiguous.
                 &clauses.long.lits(*clause)[1..]
