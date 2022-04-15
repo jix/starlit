@@ -202,7 +202,7 @@ impl<'a> ConflictAnalysisOps<'a> {
             );
         }
         for &lit in conflict.lits(self.clauses) {
-            Self::add_literal(&mut self.conflict_analysis, self.trail, lit, callbacks);
+            Self::add_literal(self.conflict_analysis, self.trail, lit, callbacks);
         }
 
         // As long as there are multiple literals of the current decision level in the current
@@ -257,12 +257,7 @@ impl<'a> ConflictAnalysisOps<'a> {
                     );
                 }
                 for &asserting_lit in step.reason.lits(self.clauses) {
-                    Self::add_literal(
-                        &mut self.conflict_analysis,
-                        self.trail,
-                        asserting_lit,
-                        callbacks,
-                    );
+                    Self::add_literal(self.conflict_analysis, self.trail, asserting_lit, callbacks);
                 }
             }
         }

@@ -79,7 +79,7 @@ impl MinimizeClause {
                 self.first_on_level[level] = index;
                 true
             } else {
-                !self.is_redundant_literal_index_rec_uncached(index, trail, clauses, 0)
+                !self.literal_index_is_redundant_rec_uncached(index, trail, clauses, 0)
             };
 
             // After retaining a literal, it is redundant wrt to the retained literals even if it
@@ -113,7 +113,7 @@ impl MinimizeClause {
     ///
     /// Trivial cases are top-level assignments, which are always redundant, and assignments that
     /// precede all clause literals on the same level, which are never redundant.
-    fn is_redundant_literal_index_cached(
+    fn literal_index_is_redundant_cached(
         &mut self,
         index: TrailIndex,
         trail: &Trail,
@@ -141,7 +141,7 @@ impl MinimizeClause {
     /// `index` is implied by (other) literals of the clause.
     ///
     /// This caches positive as well as negative results to ensure an overall linear runtime.
-    fn is_redundant_literal_index_rec(
+    fn literal_index_is_redundant_rec(
         &mut self,
         index: TrailIndex,
         trail: &Trail,
@@ -149,15 +149,15 @@ impl MinimizeClause {
         depth: usize,
     ) -> bool {
         // Check for a cached or trivial result
-        if let Some(cached) = self.is_redundant_literal_index_cached(index, trail) {
+        if let Some(cached) = self.literal_index_is_redundant_cached(index, trail) {
             return cached;
         }
-        self.is_redundant_literal_index_rec_uncached(index, trail, clauses, depth)
+        self.literal_index_is_redundant_rec_uncached(index, trail, clauses, depth)
     }
 
     /// The same as `is_redundant_literal_index_rec`, but does not perform a cache lookup for the
     /// outermost call.
-    fn is_redundant_literal_index_rec_uncached(
+    fn literal_index_is_redundant_rec_uncached(
         &mut self,
         index: TrailIndex,
         trail: &Trail,
@@ -171,7 +171,7 @@ impl MinimizeClause {
         let mut all_true = true;
         for &reason_lit in reason_lits {
             let reason_index = trail.trail_index(reason_lit.var());
-            match self.is_redundant_literal_index_cached(reason_index, trail) {
+            match self.literal_index_is_redundant_cached(reason_index, trail) {
                 Some(false) => {
                     self.cache[index] = Some(false);
                     self.to_clean.push(index);
@@ -188,12 +188,12 @@ impl MinimizeClause {
             if depth > 20 {
                 // To avoid stack overflows, at a certain depth, we switch to the slightly slower
                 // iterative version.
-                return self.is_redundant_literal_index_iter(index, reason_lits, trail, clauses);
+                return self.literal_index_is_redundant_iter(index, reason_lits, trail, clauses);
             }
 
             for &reason_lit in reason_lits {
                 let reason_index = trail.trail_index(reason_lit.var());
-                if !self.is_redundant_literal_index_rec(reason_index, trail, clauses, depth + 1) {
+                if !self.literal_index_is_redundant_rec(reason_index, trail, clauses, depth + 1) {
                     self.cache[index] = Some(false);
                     self.to_clean.push(index);
                     return false;
@@ -208,7 +208,7 @@ impl MinimizeClause {
 
     /// An iterative version of `Self::is_redundant_literal_index_rec`.
     #[cold] // Only used as fallback
-    fn is_redundant_literal_index_iter(
+    fn literal_index_is_redundant_iter(
         &mut self,
         index: TrailIndex,
         reason_lits: &[Lit],
@@ -252,7 +252,7 @@ impl MinimizeClause {
 
                 let index = trail.trail_index(lit.var());
 
-                match self.is_redundant_literal_index_cached(index, trail) {
+                match self.literal_index_is_redundant_cached(index, trail) {
                     Some(true) => continue,
 
                     Some(false) => {
@@ -265,7 +265,7 @@ impl MinimizeClause {
                         let mut all_true = true;
                         for &reason_lit in reason_lits {
                             let reason_index = trail.trail_index(reason_lit.var());
-                            match self.is_redundant_literal_index_cached(reason_index, trail) {
+                            match self.literal_index_is_redundant_cached(reason_index, trail) {
                                 Some(false) => {
                                     self.cache[index] = Some(false);
                                     self.to_clean.push(index);
