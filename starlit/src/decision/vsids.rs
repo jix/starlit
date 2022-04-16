@@ -89,12 +89,10 @@ impl Vsids {
     pub fn bump_var(&mut self, var: Var) {
         let mut rescale = false;
 
-        let increment = self.increment;
-
         self.activity.increase(var, |activity_bits| {
             let mut activity = f32::from_bits(*activity_bits);
 
-            activity += increment;
+            activity += self.increment;
 
             if activity > RESCALE_LIMIT {
                 rescale = true;
