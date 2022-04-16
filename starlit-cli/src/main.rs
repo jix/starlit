@@ -31,7 +31,7 @@ fn main() -> anyhow::Result<()> {
                 .nth(1)
                 .ok_or_else(|| anyhow::anyhow!("no input formula"))?,
         )?,
-        true,
+        flussab_cnf::cnf::Config::default(),
     )?;
 
     let header = input
