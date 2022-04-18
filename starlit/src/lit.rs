@@ -329,6 +329,16 @@ impl ops::Not for Lit {
     }
 }
 
+impl ops::BitXor<bool> for Lit {
+    type Output = Lit;
+
+    fn bitxor(self, rhs: bool) -> Self::Output {
+        Lit {
+            code: self.code ^ rhs as LitIdx,
+        }
+    }
+}
+
 /// As in the DIMACS CNF format.
 impl fmt::Debug for Lit {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
