@@ -2,6 +2,8 @@
 
 use std::{fmt, ops};
 
+use starlit_macros::Transparent;
+
 use crate::vec_map::{VecMapIndex, VecMapKey};
 
 /// The backing type used to represent literals and variables.
@@ -154,13 +156,11 @@ impl flussab_cnf::Dimacs for Var {
 /// encoding of the literal.
 ///
 /// The restriction on the range of allowed indices for `Var` also applies to `Lit`.
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Transparent)]
 #[repr(transparent)]
 pub struct Lit {
     code: LitIdx,
 }
-
-unsafe_impl_transparent!(Lit, LitIdx);
 
 impl Lit {
     /// The largest supported code of a literal.

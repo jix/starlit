@@ -43,29 +43,6 @@ pub trait ConvertStorageMut {
     unsafe fn from_storage_unchecked_mut(storage: Self::StorageMut) -> Self;
 }
 
-macro_rules! unsafe_impl_transparent {
-    ($T:ty, $S:ty) => {
-        unsafe impl $crate::util::transparent::Transparent for $T {}
-
-        impl $crate::util::transparent::ConvertStorage for $T {
-            type Storage = $S;
-
-            #[inline(always)]
-            fn into_storage(self) -> Self::Storage {
-                unsafe { ::std::mem::transmute(self) }
-            }
-
-            #[inline(always)]
-            unsafe fn from_storage_unchecked(storage: Self::Storage) -> Self {
-                ::std::mem::transmute(storage)
-            }
-        }
-
-        ::static_assertions::assert_eq_size!($T, $S);
-        ::static_assertions::assert_eq_align!($T, $S);
-    };
-}
-
 impl<'a, T: Transparent> ConvertStorage for &'a T {
     type Storage = &'a T::Storage;
 
