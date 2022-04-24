@@ -1,6 +1,8 @@
 //! Solver components for propagation and backtracking.
 
-use crate::{lit::Lit, partial_assignment::PartialAssignment, tracking::Resize};
+use crate::{
+    clause_arena::ClauseRefGcMap, lit::Lit, partial_assignment::PartialAssignment, tracking::Resize,
+};
 
 use self::{
     binary::BinaryClauses,
@@ -114,4 +116,24 @@ impl ConflictClause {
             &ConflictClause::Long(clause) => prop.long.lits(clause),
         }
     }
+}
+
+/// Perfoms garbage collection when necessary.
+pub fn collect_garbage(prop: &mut Prop) -> Option<ClauseRefGcMap> {
+    prop.long
+        .should_collect_garbage()
+        .then(|| collect_garbage_now(prop))
+}
+
+/// Unconditionally performs garbage collection.
+fn collect_garbage_now(prop: &mut Prop) -> ClauseRefGcMap {
+    tracing::debug!("garbage collection");
+    let gc_map = prop.long.collect_garbage();
+
+    prop.trail.update_clause_references(&gc_map);
+
+    prop.watches.update_clause_references(&gc_map);
+    // TODO alternatively:
+    // enable_watch_lists(prop, false);
+    gc_map
 }

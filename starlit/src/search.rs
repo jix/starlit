@@ -1,9 +1,9 @@
 //! CDCL search data structures.
 use crate::{
-    clause_arena::ClauseRefGcMap,
     conflict_analysis::{analyze_conflict, ConflictAnalysis, ConflictAnalysisCallbacks},
     lit::{Lit, Var},
     prop::{
+        collect_garbage,
         trail::{assign_decision, backtrack_to_level, BacktrackCallbacks, DecisionLevel},
         unit_prop::propagate,
         Prop,
@@ -40,7 +40,7 @@ pub fn search_step(search: &mut Search) -> Option<bool> {
     if search.prop.unsat {
         return Some(false);
     }
-    collect_garbage(search);
+    collect_garbage(&mut search.prop);
 
     let previously_propagated = search.prop.trail.propagated();
 
@@ -118,28 +118,6 @@ pub fn restart(search: &mut Search) {
             },
         )
     }
-}
-
-/// Perfoms garbage collection when necessary.
-pub fn collect_garbage(search: &mut Search) -> Option<ClauseRefGcMap> {
-    search
-        .prop
-        .long
-        .should_collect_garbage()
-        .then(|| collect_garbage_now(search))
-}
-
-/// Unconditionally performs garbage collection.
-fn collect_garbage_now(search: &mut Search) -> ClauseRefGcMap {
-    tracing::debug!("garbage collection");
-    let gc_map = search.prop.long.collect_garbage();
-
-    search.prop.trail.update_clause_references(&gc_map);
-
-    search.prop.watches.update_clause_references(&gc_map);
-    // TODO alternatively:
-    // self.clauses.enable_watch_lists(false);
-    gc_map
 }
 
 /// Statistics for the CDCL search.
