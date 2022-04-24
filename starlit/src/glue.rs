@@ -3,8 +3,8 @@ use std::mem::replace;
 
 use crate::{
     lit::Lit,
-    trail::{DecisionLevel, Trail},
-    vec_map::VecMap,
+    prop::trail::{DecisionLevel, Trail},
+    util::vec_map::VecMap,
 };
 
 /// Computes the glue level of a clause.

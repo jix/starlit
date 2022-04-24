@@ -3,7 +3,7 @@ use std::{mem::swap, ops::Index};
 
 use crate::{
     lit::LitIdx,
-    vec_map::{VecMapIndex, VecMapKey},
+    util::vec_map::{VecMapIndex, VecMapKey},
 };
 
 /// Addressable max heap.
@@ -106,7 +106,6 @@ where
 
         let mut other_pos = self.heap.len() - 1;
 
-        #[allow(clippy::branches_sharing_code)] // clippy#7369
         if other_pos == pos {
             self.heap_pos[index] = !0;
             self.heap.pop();
@@ -158,7 +157,6 @@ where
 
         let mut other_pos = self.heap.len() - 1;
 
-        #[allow(clippy::branches_sharing_code)] // clippy#7369
         if other_pos == pos {
             self.heap_pos[index] = !0;
             self.heap.pop();

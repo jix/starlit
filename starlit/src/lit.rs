@@ -2,9 +2,10 @@
 
 use std::{fmt, ops};
 
-use starlit_macros::Transparent;
-
-use crate::vec_map::{VecMapIndex, VecMapKey};
+use crate::util::{
+    transparent::Transparent,
+    vec_map::{VecMapIndex, VecMapKey},
+};
 
 /// The backing type used to represent literals and variables.
 pub type LitIdx = u32;
@@ -22,9 +23,9 @@ pub type SignedLitIdx = i32;
 /// also used by the DIMACS CNF format. Internally we call this number the DIMACS index or just
 /// DIMACS, but avoid using it for anything besides user I/O.
 ///
-/// There can be up to `Var::MAX_VAR_COUNT` variables numbered `0` to `Var::MAX_INDEX`. Here
-/// `Var::MAX_INDEX` is smaller than `usize::MAX` and even smaller than `LitIdx::MAX`. This leaves
-/// space for extra flags (as used by `Lit`) or sentinel values.
+/// There can be up to `MAX_VAR_COUNT` variables numbered `0` to `MAX_INDEX`. Here `MAX_INDEX` is
+/// smaller than `usize::MAX` and even smaller than `LitIdx::MAX`. This leaves space for extra flags
+/// (as used by `Lit`) or sentinel values.
 ///
 /// Note: Currently it is not possible to make this extra space available for Rust's niche
 /// optimization. Instead, use a `LitIdx` or a wrapper around it to store a variable with flags or
@@ -35,44 +36,83 @@ pub type SignedLitIdx = i32;
 /// Code in unsafe blocks may assume that a variable's index is constrained as described above.
 /// Hence all safe methods for creating `Var` values check these. When using unsafe methods the
 /// caller needs to ensure that these constraints hold.
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Transparent)]
 #[repr(transparent)]
 pub struct Var {
     index: LitIdx,
 }
 
+impl Copy for Var {}
+
+impl Clone for Var {
+    #[inline]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl PartialEq for Var {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index
+    }
+}
+
+impl Eq for Var {}
+
+impl PartialOrd for Var {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Var {
+    #[inline]
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.index.cmp(&other.index)
+    }
+}
+
+impl std::hash::Hash for Var {
+    #[inline]
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.index.hash(state);
+    }
+}
+
+/// The largest supported index of a variable.
+///
+/// This is less than the backing integer type supports. This enables storing a variable index
+/// and additional bits (as in `Lit`) or sentinel values in a single word.
+pub const MAX_INDEX: usize = (LitIdx::MAX >> 2) as usize;
+
+/// The number of representable variables.
+///
+/// Exactly `MAX_INDEX + 1`.
+pub const MAX_VAR_COUNT: usize = MAX_INDEX + 1;
+
+/// The largest 1-based DIMACS index of a variable.
+/// Exactly `MAX_INDEX + 1` but of type `isize`.
+pub const MAX_DIMACS: isize = MAX_INDEX as isize + 1;
+
 impl Var {
-    /// The largest supported index of a variable.
-    ///
-    /// This is less than the backing integer type supports. This enables storing a variable index
-    /// and additional bits (as in `Lit`) or sentinel values in a single word.
-    pub const MAX_INDEX: usize = (LitIdx::MAX >> 2) as usize;
-
-    /// The number of representable variables.
-    ///
-    /// Exactly `Var::MAX_INDEX + 1`.
-    pub const MAX_VAR_COUNT: usize = Var::MAX_INDEX + 1;
-
-    /// The largest 1-based DIMACS index of a variable.
-    /// Exactly `Var::MAX_INDEX + 1` but of type `isize`.
-    pub const MAX_DIMACS: isize = Var::MAX_INDEX as isize + 1;
-
     /// Variable given in the representation used by the DIMACS CNF format.
     ///
-    /// Panics if the parameter is not strictly positive or larger than `Var::MAX_DIMACS`.
+    /// Panics if the parameter is not strictly positive or larger than `MAX_DIMACS`.
     #[inline]
-    pub fn from_dimacs(number: isize) -> Var {
+    pub fn from_dimacs(number: isize) -> Self {
         assert!(number > 0);
-        Var::from_index((number - 1) as usize)
+        Self::from_index((number - 1) as usize)
     }
 
     /// Variable of a given index.
     ///
-    /// Panics when the index is larger than `Var::MAX_INDEX`.
+    /// Panics when the index is larger than `MAX_INDEX`.
     #[inline]
-    pub fn from_index(index: usize) -> Var {
-        assert!(index <= Var::MAX_INDEX);
-        Var {
+    pub fn from_index(index: usize) -> Self {
+        assert!(index <= MAX_INDEX);
+        Self {
             index: index as LitIdx,
         }
     }
@@ -81,11 +121,11 @@ impl Var {
     ///
     /// # Safety
     ///
-    /// The index must not be larger than `Var::MAX_INDEX`.
+    /// The index must not be larger than `MAX_INDEX`.
     #[inline]
-    pub unsafe fn from_index_unchecked(index: usize) -> Var {
-        debug_assert!(index <= Var::MAX_INDEX);
-        Var {
+    pub unsafe fn from_index_unchecked(index: usize) -> Self {
+        debug_assert!(index <= MAX_INDEX);
+        Self {
             index: index as LitIdx,
         }
     }
@@ -104,14 +144,14 @@ impl Var {
 }
 
 impl VecMapKey for Var {
-    #[inline(always)]
+    #[inline]
     fn vec_map_key_from_index(index: usize) -> Self {
         Self::from_index(index)
     }
 }
 
 impl VecMapIndex for Var {
-    #[inline(always)]
+    #[inline]
     fn vec_map_index(&self) -> usize {
         self.index()
     }
@@ -132,12 +172,14 @@ impl fmt::Display for Var {
 }
 
 impl flussab_cnf::Dimacs for Var {
-    const MAX_DIMACS: isize = Var::MAX_DIMACS;
+    const MAX_DIMACS: isize = MAX_DIMACS;
 
+    #[inline]
     fn from_dimacs(value: isize) -> Self {
         Var::from_dimacs(value)
     }
 
+    #[inline]
     fn dimacs(self) -> isize {
         Var::dimacs(self)
     }
@@ -162,21 +204,21 @@ pub struct Lit {
     code: LitIdx,
 }
 
-impl Lit {
-    /// The largest supported code of a literal.
-    ///
-    /// This is less than the backing integer type supports. This enables storing a literal code
-    /// and an additional bit or sentinel value in a single word.
-    ///
-    /// Equal to `2 * Var::MAX_INDEX + 1`.
-    pub const MAX_CODE: usize = 2 * Var::MAX_INDEX + 1;
+/// The largest supported code of a literal.
+///
+/// This is less than the backing integer type supports. This enables storing a literal code
+/// and an additional bit or sentinel value in a single word.
+///
+/// Equal to `2 * MAX_INDEX + 1`.
+pub const MAX_CODE: usize = 2 * MAX_INDEX + 1;
 
+impl Lit {
     /// A literal for a given variable.
     ///
     /// A positive literal if the second parameter is `true`, a negative literal otherwise.
     #[inline]
-    pub fn from_var(var: Var, positive: bool) -> Lit {
-        Lit {
+    pub fn from_var(var: Var, positive: bool) -> Self {
+        Self {
             code: (var.index << 1) | (positive as LitIdx),
         }
     }
@@ -185,8 +227,8 @@ impl Lit {
     ///
     /// Convenience method for the often needed `Lit::from_var(Var::from_index(index), positive)`.
     #[inline]
-    pub fn from_index(index: usize, positive: bool) -> Lit {
-        Lit::from_var(Var::from_index(index), positive)
+    pub fn from_index(index: usize, positive: bool) -> Self {
+        Self::from_var(Var::from_index(index), positive)
     }
 
     /// A literal for the variable of a given index, without bounds checking.
@@ -195,34 +237,34 @@ impl Lit {
     ///
     /// # Safety
     ///
-    /// The index must not be larger than `Var::MAX_INDEX`.
+    /// The index must not be larger than `MAX_INDEX`.
     #[inline]
-    pub unsafe fn from_index_unchecked(index: usize, positive: bool) -> Lit {
-        Lit::from_var(Var::from_index_unchecked(index), positive)
+    pub unsafe fn from_index_unchecked(index: usize, positive: bool) -> Self {
+        Self::from_var(Var::from_index_unchecked(index), positive)
     }
 
     /// A literal with a given encoding.
     ///
-    /// Panics when the code is larger than `Lit::MAX_CODE`.
+    /// Panics when the code is larger than `MAX_CODE`.
     #[inline]
-    pub fn from_code(code: usize) -> Lit {
-        assert!(code <= Lit::MAX_CODE);
-        Lit {
+    pub fn from_code(code: usize) -> Self {
+        assert!(code <= MAX_CODE);
+        Self {
             code: code as LitIdx,
         }
     }
 
     /// A literal with a given encoding, without bounds checking.
     ///
-    /// Panics when the code is larger than `Lit::MAX_CODE`.
+    /// Panics when the code is larger than `MAX_CODE`.
     ///
     /// # Safety
     ///
-    /// The code must not be larger than `Lit::MAX_CODE`.
+    /// The code must not be larger than `MAX_CODE`.
     #[inline]
-    pub unsafe fn from_code_unchecked(code: usize) -> Lit {
-        debug_assert!(code <= Lit::MAX_CODE);
-        Lit {
+    pub unsafe fn from_code_unchecked(code: usize) -> Self {
+        debug_assert!(code <= MAX_CODE);
+        Self {
             code: code as LitIdx,
         }
     }
@@ -231,8 +273,8 @@ impl Lit {
     ///
     /// Panics if the parameter is zero or has an absolute value larger than `Var::MAX_DIMACS`.
     #[inline]
-    pub fn from_dimacs(number: isize) -> Lit {
-        Lit::from_var(Var::from_dimacs(number.abs()), number > 0)
+    pub fn from_dimacs(number: isize) -> Self {
+        Self::from_var(Var::from_dimacs(number.abs()), number > 0)
     }
 
     /// Encoding of this literal.
@@ -278,62 +320,66 @@ impl Lit {
     /// Returns an arbitrary literal or panics if none of the given literals are equal to this
     /// literal.
     #[inline]
-    pub fn select_other(self, a: Lit, b: Lit) -> Lit {
-        debug_assert!(self == a || self == b, "{:?} not in {:?} {:?}", self, a, b);
-        Lit {
+    pub fn select_other(self, a: Self, b: Self) -> Self {
+        debug_assert!(self == a || self == b);
+        Self {
             code: self.code ^ a.code ^ b.code,
         }
     }
 }
 
 impl VecMapKey for Lit {
-    #[inline(always)]
+    #[inline]
     fn vec_map_key_from_index(index: usize) -> Self {
         Self::from_code(index)
     }
 }
 
 impl VecMapIndex for Lit {
-    #[inline(always)]
+    #[inline]
     fn vec_map_index(&self) -> usize {
         self.code()
     }
 }
 
 impl VecMapIndex<Var> for Lit {
-    #[inline(always)]
+    #[inline]
     fn vec_map_index(&self) -> usize {
         self.index()
     }
 }
 
 impl flussab_cnf::Dimacs for Lit {
-    const MAX_DIMACS: isize = Var::MAX_DIMACS;
+    const MAX_DIMACS: isize = MAX_DIMACS;
 
+    #[inline]
     fn from_dimacs(value: isize) -> Self {
         Lit::from_dimacs(value)
     }
 
+    #[inline]
     fn dimacs(self) -> isize {
         Lit::dimacs(self)
     }
 }
 
 impl ops::Not for Lit {
-    type Output = Lit;
+    type Output = Self;
 
+    #[inline]
     fn not(self) -> Self::Output {
-        Lit {
+        Self {
             code: self.code ^ 1,
         }
     }
 }
 
 impl ops::BitXor<bool> for Lit {
-    type Output = Lit;
+    type Output = Self;
 
+    #[inline]
     fn bitxor(self, rhs: bool) -> Self::Output {
-        Lit {
+        Self {
             code: self.code ^ rhs as LitIdx,
         }
     }

@@ -2,10 +2,9 @@ use std::io::Write;
 
 use mimalloc::MiMalloc;
 use starlit::{
-    clauses::long::SolverClauseData,
     lit::{Lit, Var},
-    tracking::TracksVarCount,
-    trail::{DecisionLevel, Reason, Step},
+    prop::{add_clause_verbatim, long::LongHeader},
+    tracking::Resize,
 };
 use tracing_subscriber::fmt::MakeWriter;
 
@@ -55,34 +54,14 @@ fn main() -> anyhow::Result<()> {
         .header()
         .ok_or_else(|| anyhow::anyhow!("no header in input file"))?;
 
-    solver.set_var_count(header.var_count);
-
-    let mut units = vec![];
+    solver.resize(header.var_count);
 
     while let Some(clause) = input.next_clause()? {
-        if let [unit] = *clause {
-            units.push(unit);
-        } else {
-            solver
-                .search
-                .clauses
-                .add_clause(SolverClauseData::new_input_clause(), clause);
-        }
-    }
-
-    for unit in units {
-        if solver.search.trail.assigned.is_false(unit) {
-            tracing::info!("unit conflict");
-            println!("s UNSATISFIABLE");
-            std::process::exit(20);
-        } else if solver.search.trail.assigned.is_true(unit) {
-            continue;
-        }
-        solver.search.trail.assign(Step {
-            assigned_lit: unit,
-            decision_level: DecisionLevel::TOP,
-            reason: Reason::Unit,
-        });
+        add_clause_verbatim(
+            &mut solver.search.prop,
+            LongHeader::new_input_clause(),
+            clause,
+        );
     }
 
     let satisfiable = solver.solve();
@@ -111,7 +90,7 @@ fn main() -> anyhow::Result<()> {
         print!("v ");
         for var in (0..header.var_count).map(Var::from_index) {
             let lit = Lit::from_var(var, true);
-            let negate = solver.search.trail.assigned.is_false(lit);
+            let negate = solver.search.prop.values.is_false(lit);
             print!("{} ", lit ^ negate);
         }
         println!("0");

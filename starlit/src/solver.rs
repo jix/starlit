@@ -1,7 +1,15 @@
 //! Complete SAT solver interface.
 //!
 //! Groups all components necessary for the solver.
-use crate::{luby::LubySequence, reduce::ReduceOps, search::Search, tracking::TracksVarCount};
+use crate::{
+    search::{restart, search_step, Search},
+    tracking::Resize,
+};
+
+use self::{luby::LubySequence, reduce::reduce};
+
+mod luby;
+mod reduce;
 
 /// Contains all components of a SAT solver.
 #[derive(Default)]
@@ -11,13 +19,9 @@ pub struct Solver {
     pub schedule: Schedule,
 }
 
-impl TracksVarCount for Solver {
-    fn var_count(&self) -> usize {
-        self.search.var_count()
-    }
-
-    fn set_var_count(&mut self, var_count: usize) {
-        self.search.set_var_count(var_count)
+impl Resize for Solver {
+    fn resize(&mut self, var_count: usize) {
+        self.search.resize(var_count)
     }
 }
 
@@ -26,17 +30,14 @@ impl Solver {
     pub fn solve(&mut self) -> bool {
         loop {
             if self.schedule.should_restart(&self.search) {
-                self.search.restart();
+                restart(&mut self.search);
             }
 
             if self.schedule.should_reduce(&self.search) {
-                ReduceOps {
-                    search: &mut self.search,
-                }
-                .reduce();
+                reduce(&mut self.search);
             }
 
-            if let Some(verdict) = self.search.search_step() {
+            if let Some(verdict) = search_step(&mut self.search) {
                 return verdict;
             }
         }

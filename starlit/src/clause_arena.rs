@@ -1,158 +1,107 @@
-//! Storage of long clauses.
-use std::{cmp::Ordering, hint::unreachable_unchecked, mem::size_of, slice};
-
-use starlit_macros::Bitfield;
-use static_assertions::const_assert;
+//! Compact storage for clauses of varying length.
+use std::{cmp::Ordering, hint::unreachable_unchecked};
 
 use crate::{
-    lit::{Lit, LitIdx, Var},
-    util::transparent::{ConvertStorage, ConvertStorageMut},
+    lit::{Lit, LitIdx},
+    util::transparent::{ConvertStorage, ConvertStorageMut, Transparent},
 };
 
 /// The backing type used to represent clause references.
 type ClauseRefId = u32;
 
-/// Reference to a long clause.
+/// Reference to clause inside the arena.
 ///
-/// Identifies a clause stored by [`LongClauses`]. After garbage collection of the [`LongClauses`]
+/// Identifies a clause stored by [`ClauseArena`]. After garbage collection of the [`ClauseArena`]
 /// external references requies a fixup or they become invalid.
-#[repr(transparent)]
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+#[repr(transparent)]
 pub struct ClauseRef {
     id: ClauseRefId,
 }
 
-/// Data that can be safely stored with each clause in `LongClauses`.
-///
-/// # Safety
-/// This is only safe to implement for types whose values have a representation equivalent to `[u32;
-/// N]` for some `N` with each array element having an MSB of zero. This must also hold when
-/// mutating values of the type. Allowing a MSB to become one is not memory safe when used in
-/// `LongClauses`.
-pub unsafe trait ClauseData: Copy {
-    /// Called when size of the associated clause is decreases.
-    ///
-    /// This can be used to update data that might become invalid when this happens.
-    fn shrink_clause(&mut self, len: usize);
-}
-
-/// Data associated with a clause during solving.
-#[repr(C)]
-#[derive(Bitfield, Clone, Copy, Default)]
-pub struct SolverClauseData {
-    // SAFETY the MSB of any contained word must be zero
-    #[bitfield(
-        /// whether the clause is redundant.
-        1 => pub redundant: bool,
-        /// whether the clause is protected.
-        1 => pub protected: bool,
-        /// the glue level of the clause.
-        ///
-        /// Also called Literal Block Distance (LBD).
-        6 clamp => pub glue: usize,
-        /// how often the clause was recently used.
-        ///
-        /// This is incremented everytime the clause is involved in a conflict and decremented
-        /// during every reduction. Both increments and decrements are saturating.
-        2 clamp => pub used: usize,
-        1, // SAFETY reserve the MSB
-    )]
+/// A `LitIdx` with the most significant bit unset.
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Default, Transparent, Debug)]
+#[repr(transparent)]
+pub struct HeaderWord {
     data: LitIdx,
-    /// Used to implement circular scanning during propagation
-    ///
-    /// See also ["Optimal Implementation of Watched Literals and More General
-    /// Techniques"](https://doi.org/10.1613/jair.4016)
-    search_pos: LitIdx,
 }
 
-impl SolverClauseData {
-    /// Returns new clause data for an input clause.
-    pub fn new_input_clause() -> Self {
-        Self::default()
-    }
+const HEADER_MASK: LitIdx = LitIdx::MAX >> 1;
+const LEN_MARKER: LitIdx = !HEADER_MASK;
 
-    /// Returns new clause data for a learned clause.
-    pub fn new_learned_clause() -> Self {
-        let mut data = Self::default();
-        data.set_redundant(true);
-        // Count the initial learning as use, so that the clause can survive an immediately
-        // following reduction.
-        data.set_used(1);
-        data
-    }
-}
-
-impl SolverClauseData {
-    /// Returns the circular scanning position used durig propagation.
-    ///
-    /// Note that this starts counting with position 0 for the 3rd literal, i.e. skipping the
-    /// watched literals.
-    ///
-    /// See also ["Optimal Implementation of Watched Literals and More General
-    /// Techniques"](https://doi.org/10.1613/jair.4016)
-    pub fn search_pos(&self) -> usize {
-        self.search_pos as _
-    }
-
-    /// Updates the circular scanning position used durig propagation.
-    ///
-    /// Note that this starts counting with position 0 for the 3rd literal, i.e. skipping the
-    /// watched literals.
-    pub fn set_search_pos(&mut self, search_pos: usize) {
-        // SAFETY masking out the MSB maintains a safety invariant
-        self.search_pos = (search_pos as LitIdx) & !LIT_IDX_MSB
-    }
-}
-
-// SAFETY the MSB of any contained word must be zero
-unsafe impl ClauseData for SolverClauseData {
-    fn shrink_clause(&mut self, _len: usize) {
-        self.search_pos = 0;
-    }
-}
-
-/// Header of a clause stored within [`LongClauses`].
-#[repr(C)]
-struct ClauseHeader<D: ClauseData> {
-    /// Further associated data
-    data: D,
-    /// Length of the clause with MSB set
-    // SAFETY this must be the last word in this struct (with no padding)
-    // TODO add assertions for this as soon as `ptr::addr_of` arrives in stable rust
-    len_with_marker: LitIdx,
-}
-
-const LIT_IDX_MSB: LitIdx = !(!0 >> 1);
-
-const_assert!(Lit::MAX_CODE < LIT_IDX_MSB as usize); // Ensure that the MSB of a Lit is not set
-
-impl<D: ClauseData> ClauseHeader<D> {
-    const WORDS: usize = size_of::<Self>() / size_of::<LitIdx>();
-    const LEN_OFFSET: usize = Self::WORDS - 1;
-
-    pub fn new(data: D, len: usize) -> Self
-    where
-        D: Default,
-    {
-        assert!((LongClauses::<D>::MIN_LEN..=Var::MAX_VAR_COUNT).contains(&len));
-        ClauseHeader {
-            data,
-            len_with_marker: (len as LitIdx) | LIT_IDX_MSB,
+impl HeaderWord {
+    /// Returns a [`HeaderWord`] containing `data` with the most significant bit unset.
+    pub fn new(data: LitIdx) -> Self {
+        Self {
+            data: data & HEADER_MASK,
         }
     }
+
+    /// Returns a bit at a fixed position within the word.
+    pub fn bit<const BIT: u32>(self) -> bool {
+        assert!(BIT < LitIdx::BITS - 1);
+        self.data & (1 << BIT) != 0
+    }
+
+    /// Sets a bit at a fixed position within the word.
+    pub fn set_bit<const BIT: u32>(&mut self, value: bool) {
+        assert!(BIT < LitIdx::BITS - 1);
+        self.data = (self.data & !(1 << BIT)) | ((value as LitIdx) << BIT);
+    }
+
+    /// Returns an integer stored at a fixed range of bits within the word.
+    pub fn field<const START: u32, const WIDTH: u32>(self) -> LitIdx {
+        assert!(START + WIDTH <= LitIdx::BITS - 1);
+        (self.data >> START) & ((1 << WIDTH) - 1)
+    }
+
+    /// Sets an integer stored at a fixed range of bits within the word.
+    ///
+    /// If the passed value is larger than can be stored in the range of bits, the largest value
+    /// that fits is stored instead.
+    pub fn set_field<const START: u32, const WIDTH: u32>(&mut self, mut value: LitIdx) {
+        assert!(START + WIDTH <= LitIdx::BITS - 1);
+        if value > ((1 << WIDTH) - 1) {
+            value = (1 << WIDTH) - 1;
+        }
+
+        self.data = (self.data & !(((1 << WIDTH) - 1) << START)) | (value << START);
+    }
 }
 
-/// Collection storing long clauses.
-///
-/// A clause is considered long if it has at least 3 literals.
-pub struct LongClauses<D: ClauseData = SolverClauseData> {
+impl From<HeaderWord> for LitIdx {
+    fn from(word: HeaderWord) -> Self {
+        word.data
+    }
+}
+
+/// A [`ClauseHeader`] containing no data.
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Transparent, Default)]
+#[repr(C)]
+pub struct EmptyClauseHeader(pub [HeaderWord; 0]);
+
+impl ClauseHeader for EmptyClauseHeader {}
+
+/// Type that can be stored as a clause header within a [`ClauseArena`].
+pub trait ClauseHeader: Transparent {
+    /// Updates a `ClauseHeader` when the number of clause literals is reduced.
+    #[inline]
+    #[allow(unused_variables)]
+    fn shrink_clause(&mut self, old_len: usize, new_len: usize) {}
+}
+
+/// Error type returned when adding a clause would exceed the range of [`ClauseRef`].
+#[derive(Debug)]
+pub struct ArenaSpaceExhausted;
+
+/// Compact storage for many clauses with varying clause lengths.
+pub struct ClauseArena<Header> {
     // SAFETY see doc comment below
     /// Linear buffer storing all clauses.
     ///
-    /// A [`ClauseRef`] indexes into this buffer and points at a [`ClauseHeader`] which is
-    /// immediately followed by the clause's literals. The only words (`LitIdx` values) in the
-    /// buffer which have their MSB set are the words containing the clause length. The clause
-    /// length is contained in the last word of a clause header, directly preceeding the literals.
+    /// A [`ClauseRef`] indexes into this buffer and points at a fixed size [`ClauseHeader`]
+    /// followed by the clauses's length and then the clause's literals. The only words (`LitIdx`
+    /// values) in the buffer which have their MSB set are the words containing the clause length.
     ///
     /// The MSB is used to detect clauses during iteration as well as to verify the validity of any
     /// passed [`ClauseRef`] values. The stored length is trusted and assumed to be in bounds, so
@@ -164,52 +113,63 @@ pub struct LongClauses<D: ClauseData = SolverClauseData> {
     ///
     /// When a clause is deleted, its size is set to zero. In that case, to still allow fast
     /// iteration over clauses, the first literal of the clause is replaced with the clause's
-    /// previous length (without the MSB set). This is not a safety invariant, but setting that word
-    /// to a value larger than the length will break clause iteration.
+    /// previous length (without the MSB set).
     buffer: Vec<LitIdx>,
 
     /// Number of words in `buffer` corresponding to deleted clauses.
     garbage_count: usize,
 
-    _marker: std::marker::PhantomData<D>,
+    _marker: std::marker::PhantomData<Header>,
 }
 
-impl<D: ClauseData> Default for LongClauses<D> {
+impl<Header> Default for ClauseArena<Header> {
     fn default() -> Self {
         Self {
-            buffer: Default::default(),
+            buffer: vec![],
             garbage_count: 0,
-            _marker: std::marker::PhantomData::<D>,
+            _marker: std::marker::PhantomData,
         }
     }
 }
 
-impl<D: ClauseData> LongClauses<D> {
-    /// Minimal length of a long clause
-    pub const MIN_LEN: usize = 3;
+fn array_ptr<T, const LEN: usize>(first: *const T) -> *const [T; LEN] {
+    first.cast()
+}
 
+fn array_mut_ptr<T, const LEN: usize>(first: *mut T) -> *mut [T; LEN] {
+    first.cast()
+}
+
+impl<Header, const HEADER_LEN: usize> ClauseArena<Header>
+where
+    Header: ClauseHeader<Storage = [HeaderWord; HEADER_LEN]>,
+{
     /// Adds a new clause to the collection.
-    pub fn add_clause(&mut self, data: D, clause_lits: &[Lit]) -> ClauseRef
-    where
-        D: Default,
-    {
+    ///
+    /// Panics when `lits` is empty.
+    pub fn add_clause(
+        &mut self,
+        header: Header,
+        lits: &[Lit],
+    ) -> Result<ClauseRef, ArenaSpaceExhausted> {
+        assert!(!lits.is_empty());
         let id = self.buffer.len();
-        // TODO eventually this check should not panic
-        assert!(id <= ClauseRefId::MAX as usize);
-        let header = ClauseHeader::<D>::new(data, clause_lits.len());
-        assert_eq!(
-            ClauseHeader::<D>::WORDS * size_of::<LitIdx>(),
-            size_of::<ClauseHeader::<D>>()
-        );
-        self.buffer.extend_from_slice(unsafe {
-            // SAFETY allowed due to `D: ClauseData` and the assert above
-            std::slice::from_raw_parts(
-                &header as *const _ as *const LitIdx,
-                ClauseHeader::<D>::WORDS,
-            )
-        });
-        self.buffer.extend_from_slice(clause_lits.into_storage());
-        ClauseRef { id: id as _ }
+        if id > ClauseRefId::MAX as usize || lits.len() > HEADER_MASK as usize {
+            return Err(ArenaSpaceExhausted);
+        }
+        let grow = lits.len() + HEADER_LEN + 1;
+        self.buffer.reserve(grow);
+        unsafe {
+            let mut spare = self.buffer.as_mut_ptr().add(self.buffer.len());
+
+            array_mut_ptr::<_, HEADER_LEN>(spare).write(header.into_storage().into_storage());
+            spare = spare.add(HEADER_LEN);
+            spare.write((lits.len() as LitIdx) | LEN_MARKER);
+            spare = spare.add(1);
+            spare.copy_from_nonoverlapping(lits.into_storage().as_ptr(), lits.len());
+            self.buffer.set_len(self.buffer.len() + grow);
+        }
+        Ok(ClauseRef { id: id as _ })
     }
 
     /// Returns the length of a clause.
@@ -221,12 +181,12 @@ impl<D: ClauseData> LongClauses<D> {
     /// collection), this returns zero and can be used to detect such references.
     pub fn clause_len(&self, clause: ClauseRef) -> usize {
         // Equivalent to calling `unwrap` on the result of `try_clause_len`.
-        let len_with_marker = self.buffer[clause.id as usize + ClauseHeader::<D>::LEN_OFFSET];
+        let len_with_marker = self.buffer[clause.id as usize + HEADER_LEN];
         // SAFETY this check ensures that an invalid ClausRef is detected
-        if len_with_marker & LIT_IDX_MSB == 0 {
+        if len_with_marker & LEN_MARKER == 0 {
             panic!("invalid ClauseRef");
         }
-        (len_with_marker & !LIT_IDX_MSB) as usize
+        (len_with_marker & HEADER_MASK) as usize
     }
 
     /// Returns a reference to the literals of a clause without validity or bounds checking.
@@ -239,9 +199,10 @@ impl<D: ClauseData> LongClauses<D> {
     /// corresponding clause.
     pub unsafe fn lits_unchecked_with_len(&self, clause: ClauseRef, len: usize) -> &[Lit] {
         debug_assert_eq!(self.clause_len(clause), len);
+
         <&[Lit]>::from_storage_unchecked(
             self.buffer
-                .get_unchecked(clause.id as usize + ClauseHeader::<D>::WORDS..)
+                .get_unchecked(clause.id as usize + HEADER_LEN + 1..)
                 .get_unchecked(..len),
         )
     }
@@ -260,9 +221,10 @@ impl<D: ClauseData> LongClauses<D> {
         len: usize,
     ) -> &mut [Lit] {
         debug_assert_eq!(self.clause_len(clause), len);
+
         <&mut [Lit]>::from_storage_unchecked_mut(
             self.buffer
-                .get_unchecked_mut(clause.id as usize + ClauseHeader::<D>::WORDS..)
+                .get_unchecked_mut(clause.id as usize + HEADER_LEN + 1..)
                 .get_unchecked_mut(..len),
         )
     }
@@ -285,66 +247,64 @@ impl<D: ClauseData> LongClauses<D> {
         unsafe { self.lits_unchecked_with_len_mut(clause, self.clause_len(clause)) }
     }
 
-    /// Returns a reference to the associated data of a clause without validity or bounds checking.
+    /// Returns a reference to the header of a clause without validity or bounds checking.
     ///
     /// Works on valid references to deleted clauses (which will be invalidated during the next
     /// garbage collection).
     ///
     /// # Safety
     /// Here `clause` needs to be valid.
-    pub unsafe fn data_unchecked(&self, clause: ClauseRef) -> &D {
+    pub unsafe fn header_unchecked(&self, clause: ClauseRef) -> &Header {
         #[cfg(debug_assertions)]
         self.clause_len(clause);
 
-        let header = &*(self.buffer.as_ptr().add(clause.id as usize) as *const ClauseHeader<D>);
-
-        &header.data
+        <&Header>::from_storage_unchecked(<&_>::from_storage_unchecked(
+            &*array_ptr::<_, HEADER_LEN>(self.buffer.as_ptr().add(clause.id as usize)),
+        ))
     }
 
-    /// Returns a mutable reference to the associated data of a clause without validity or bounds
+    /// Returns a mutable reference to the header of a clause without validity or bounds checking.
+    ///
+    /// Works on valid references to deleted clauses (which will be invalidated during the next
+    /// garbage collection).
+    ///
+    /// # Safety
+    /// Here `clause` needs to be valid.
+    pub unsafe fn header_unchecked_mut(&mut self, clause: ClauseRef) -> &mut Header {
+        #[cfg(debug_assertions)]
+        self.clause_len(clause);
+
+        <&mut Header>::from_storage_unchecked_mut(<&mut _>::from_storage_unchecked_mut(
+            &mut *array_mut_ptr::<_, HEADER_LEN>(self.buffer.as_mut_ptr().add(clause.id as usize)),
+        ))
+    }
+
+    /// Returns a reference to the header of a clause.
+    ///
+    /// Panics if the clause reference is invalid. Works on valid references to deleted clauses
+    /// (which will be invalidated during the next garbage collection).
+    pub fn header(&self, clause: ClauseRef) -> &Header {
+        self.clause_len(clause);
+        unsafe {
+            // SAFETY `clause_len` panics if `clause` is invalid
+            self.header_unchecked(clause)
+        }
+    }
+
+    /// Returns a mutable reference to the header of a clause.
+    ///
+    /// Panics if the clause reference is invalid. Works on valid references to deleted clauses
+    /// (which will be invalidated during the next garbage collection).
+    pub fn header_mut(&mut self, clause: ClauseRef) -> &mut Header {
+        self.clause_len(clause);
+        unsafe {
+            // SAFETY `clause_len` panics if `clause` is invalid
+            self.header_unchecked_mut(clause)
+        }
+    }
+
+    /// Returns a reference to the literals and header of a clause without validity or bounds
     /// checking.
-    ///
-    /// Works on valid references to deleted clauses (which will be invalidated during the next
-    /// garbage collection).
-    ///
-    /// # Safety
-    /// Here `clause` needs to be valid.
-    pub unsafe fn data_unchecked_mut(&mut self, clause: ClauseRef) -> &mut D {
-        #[cfg(debug_assertions)]
-        self.clause_len(clause);
-
-        let header =
-            &mut *(self.buffer.as_mut_ptr().add(clause.id as usize) as *mut ClauseHeader<D>);
-
-        &mut header.data
-    }
-
-    /// Returns a reference to the associated data of a clause.
-    ///
-    /// Panics if the clause reference is invalid. Works on valid references to deleted clauses
-    /// (which will be invalidated during the next garbage collection).
-    pub fn data(&self, clause: ClauseRef) -> &D {
-        self.clause_len(clause);
-        unsafe {
-            // SAFETY `clause_len` panics if `clause` is invalid
-            self.data_unchecked(clause)
-        }
-    }
-
-    /// Returns a mutable reference to the associated data of a clause.
-    ///
-    /// Panics if the clause reference is invalid. Works on valid references to deleted clauses
-    /// (which will be invalidated during the next garbage collection).
-    pub fn data_mut(&mut self, clause: ClauseRef) -> &mut D {
-        self.clause_len(clause);
-        unsafe {
-            // SAFETY `clause_len` panics if `clause` is invalid
-            self.data_unchecked_mut(clause)
-        }
-    }
-
-    /// Returns a reference to the literals and associated data of a clause without validity or
-    /// bounds checking.
     ///
     /// For a valid reference to a deleted clause (which will be invalidated during the next garbage
     /// collection), this returns an empty slice for the literals.
@@ -352,23 +312,30 @@ impl<D: ClauseData> LongClauses<D> {
     /// # Safety
     /// Here `clause` needs to be valid and `len` needs to be the actualy length of the
     /// corresponding clause.
-    pub unsafe fn data_and_lits_unchecked_with_len(
+    pub unsafe fn header_and_lits_unchecked_with_len(
         &self,
         clause: ClauseRef,
         len: usize,
-    ) -> (&D, &[Lit]) {
+    ) -> (&Header, &[Lit]) {
         debug_assert_eq!(self.clause_len(clause), len);
-        let ptr = self.buffer.as_ptr().add(clause.id as usize);
-        let header = &*(ptr as *const ClauseHeader<D>);
-        let lits = <&[Lit]>::from_storage_unchecked(slice::from_raw_parts(
-            ptr.add(ClauseHeader::<D>::WORDS),
-            len,
-        ));
-        (&header.data, lits)
+
+        (
+            <&Header>::from_storage_unchecked(<&_>::from_storage_unchecked(&*array_ptr::<
+                _,
+                HEADER_LEN,
+            >(
+                self.buffer.as_ptr().add(clause.id as usize),
+            ))),
+            <&[Lit]>::from_storage_unchecked(
+                self.buffer
+                    .get_unchecked(clause.id as usize + HEADER_LEN + 1..)
+                    .get_unchecked(..len),
+            ),
+        )
     }
 
-    /// Returns a mutable reference to the literals and associated data of a clause without validity
-    /// or bounds checking.
+    /// Returns a mutable reference to the literals and header of a clause without validity or
+    /// bounds checking.
     ///
     /// For a valid reference to a deleted clause (which will be invalidated during the next garbage
     /// collection), this returns an empty slice  for the literals.
@@ -376,53 +343,59 @@ impl<D: ClauseData> LongClauses<D> {
     /// # Safety
     /// Here `clause` needs to be valid and `len` needs to be the actualy length of the
     /// corresponding clause.
-    pub unsafe fn data_and_lits_unchecked_with_len_mut(
+    pub unsafe fn header_and_lits_unchecked_with_len_mut(
         &mut self,
         clause: ClauseRef,
         len: usize,
-    ) -> (&mut D, &mut [Lit]) {
+    ) -> (&mut Header, &mut [Lit]) {
         debug_assert_eq!(self.clause_len(clause), len);
-        let ptr = self.buffer.as_mut_ptr().add(clause.id as usize);
-        let header = &mut *(ptr as *mut ClauseHeader<D>);
-        let lits = <&mut [Lit]>::from_storage_unchecked_mut(slice::from_raw_parts_mut(
-            ptr.add(ClauseHeader::<D>::WORDS),
-            len,
-        ));
-        (&mut header.data, lits)
+
+        (
+            <&mut Header>::from_storage_unchecked_mut(<&mut _>::from_storage_unchecked_mut(
+                &mut *array_mut_ptr::<_, HEADER_LEN>(
+                    self.buffer.as_mut_ptr().add(clause.id as usize),
+                ),
+            )),
+            <&mut [Lit]>::from_storage_unchecked_mut(
+                self.buffer
+                    .get_unchecked_mut(clause.id as usize + HEADER_LEN + 1..)
+                    .get_unchecked_mut(..len),
+            ),
+        )
     }
 
-    /// Returns a reference to the literals and associated data of a clause.
+    /// Returns a reference to the literals and header of a clause.
     ///
     /// Panics if the clause reference is invalid. For a valid reference to a deleted clause (which
     /// will be invalidated during the next garbage collection), this returns an empty slice.
-    pub fn data_and_lits(&self, clause: ClauseRef) -> (&D, &[Lit]) {
+    pub fn header_and_lits(&self, clause: ClauseRef) -> (&Header, &[Lit]) {
         // SAFETY clause_len panics when `clause` is invalid
-        unsafe { self.data_and_lits_unchecked_with_len(clause, self.clause_len(clause)) }
+        unsafe { self.header_and_lits_unchecked_with_len(clause, self.clause_len(clause)) }
     }
 
-    /// Returns a mutable reference to the literals and associated data of a clause.
+    /// Returns a mutable reference to the literals and header of a clause.
     ///
     /// Panics if the clause reference is invalid. For a valid reference to a deleted clause (which
     /// will be invalidated during the next garbage collection), this returns an empty slice.
-    pub fn data_and_lits_mut(&mut self, clause: ClauseRef) -> (&mut D, &mut [Lit]) {
+    pub fn header_and_lits_mut(&mut self, clause: ClauseRef) -> (&mut Header, &mut [Lit]) {
         // SAFETY clause_len panics when `clause` is invalid
-        unsafe { self.data_and_lits_unchecked_with_len_mut(clause, self.clause_len(clause)) }
+        unsafe { self.header_and_lits_unchecked_with_len_mut(clause, self.clause_len(clause)) }
     }
 
     /// Returns a [`ClauseRef`] to the next clause stored after `start` if such a clause exists.
     fn find_clause(&self, start: usize) -> Option<ClauseRef> {
-        let mut pos = start + ClauseHeader::<D>::LEN_OFFSET;
+        let mut pos = start + HEADER_LEN;
 
         loop {
             let word = *self.buffer.get(pos)?;
-            if word & LIT_IDX_MSB != 0 {
-                if word == LIT_IDX_MSB {
+            if word & LEN_MARKER != 0 {
+                if word == LEN_MARKER {
                     // This is a deleted clause, next word contains the previous length of the
                     // deleted clause.
-                    pos += self.buffer[pos + 1] as usize + ClauseHeader::<D>::WORDS;
+                    pos += self.buffer[pos + 1] as usize + HEADER_LEN + 1;
                 } else {
                     return Some(ClauseRef {
-                        id: (pos - ClauseHeader::<D>::LEN_OFFSET) as _,
+                        id: (pos - HEADER_LEN) as _,
                     });
                 }
             } else {
@@ -439,8 +412,8 @@ impl<D: ClauseData> LongClauses<D> {
     ///
     /// This allows iteration using the following pattern:
     /// ```rust
-    /// # use starlit::clauses::long::{LongClauses, SolverClauseData};
-    /// let mut long_clauses = LongClauses::<SolverClauseData>::default();
+    /// # use starlit::clause_arena::{ClauseArena, EmptyClauseHeader};
+    /// let mut long_clauses = ClauseArena::<EmptyClauseHeader>::default();
     /// // ...
     /// let mut clause_iter = None;
     /// while let Some(clause) = long_clauses.next_clause(&mut clause_iter) {
@@ -451,9 +424,7 @@ impl<D: ClauseData> LongClauses<D> {
     pub fn next_clause(&self, clause: &mut Option<ClauseRef>) -> Option<ClauseRef> {
         let start = match *clause {
             None => 0,
-            Some(clause) => {
-                (clause.id as usize) + self.clause_len(clause) + ClauseHeader::<D>::WORDS
-            }
+            Some(clause) => (clause.id as usize) + self.clause_len(clause) + HEADER_LEN + 1,
         };
         *clause = self.find_clause(start);
         *clause
@@ -461,20 +432,24 @@ impl<D: ClauseData> LongClauses<D> {
 
     /// Shrink the size of a clause, dropping final literals.
     ///
-    /// Panics when the new size is larger than the initial size or smaller than
-    /// [`LongClauses::MIN_LEN`].
+    /// Panics when the new size is zero or larger than the clause's current size.
     pub fn shrink_clause(&mut self, clause: ClauseRef, new_len: usize) {
+        assert_ne!(new_len, 0);
         let len = self.clause_len(clause);
-        assert!((Self::MIN_LEN..=len).contains(&new_len));
+        assert!(new_len <= len);
+
+        self.garbage_count += len - new_len;
+
         unsafe {
             // SAFETY `clause_len` above asserts that `clause` is valid
             *self
                 .buffer
-                .get_unchecked_mut(clause.id as usize + ClauseHeader::<D>::LEN_OFFSET) =
-                LIT_IDX_MSB | (new_len as LitIdx);
+                .get_unchecked_mut(clause.id as usize + HEADER_LEN) =
+                LEN_MARKER | (new_len as LitIdx);
 
-            // The search_pos might now point past the last element of the clause, so we reset it.
-            self.data_unchecked_mut(clause).shrink_clause(new_len);
+            // The header might have to be updated when the clause size changes.
+            self.header_unchecked_mut(clause)
+                .shrink_clause(len, new_len);
         }
     }
 
@@ -484,18 +459,16 @@ impl<D: ClauseData> LongClauses<D> {
     /// clause's literals will return an empty slice.
     pub fn delete_clause(&mut self, clause: ClauseRef) {
         let len = self.clause_len(clause);
-        self.garbage_count += len + ClauseHeader::<D>::WORDS;
+        self.garbage_count += len + HEADER_LEN + 1;
         if len > 0 {
             unsafe {
                 // SAFETY `clause_len` above asserts that `clause` is valid
                 *self
                     .buffer
-                    .get_unchecked_mut(clause.id as usize + ClauseHeader::<D>::LEN_OFFSET) =
-                    LIT_IDX_MSB;
+                    .get_unchecked_mut(clause.id as usize + HEADER_LEN) = LEN_MARKER;
                 *self
                     .buffer
-                    .get_unchecked_mut(clause.id as usize + ClauseHeader::<D>::WORDS) =
-                    len as LitIdx;
+                    .get_unchecked_mut(clause.id as usize + HEADER_LEN + 1) = len as LitIdx;
             }
         }
     }
@@ -516,7 +489,7 @@ impl<D: ClauseData> LongClauses<D> {
         self.next_clause(&mut read);
         while let Some(clause) = read {
             self.next_clause(&mut read); // we are free to move `clause` below here
-            let storage_size = self.clause_len(clause) + ClauseHeader::<D>::WORDS;
+            let storage_size = self.clause_len(clause) + HEADER_LEN + 1;
             let read_offset = clause.id as usize;
             if read_offset != expected_read_offset {
                 gaps.push(GcMapGap {
@@ -554,7 +527,7 @@ impl<D: ClauseData> LongClauses<D> {
     }
 }
 
-/// Used to update [`ClauseRef`] values after [`LongClauses::collect_garbage`].
+/// Used to update [`ClauseRef`] values after [`ClauseArena::collect_garbage`].
 ///
 /// A garbage collection invaldiates all [`ClauseRef`] values, but this map can be used to update
 /// them so they become valid again.
@@ -622,6 +595,18 @@ struct GcMapGap {
 mod tests {
     use super::*;
 
+    #[derive(Default, Transparent)]
+    #[repr(transparent)]
+    struct TestHeader {
+        words: [HeaderWord; 1],
+    }
+
+    impl ClauseHeader for TestHeader {
+        fn shrink_clause(&mut self, _old_len: usize, new_len: usize) {
+            self.words[0] = HeaderWord::new(new_len as _);
+        }
+    }
+
     macro_rules! clause {
         ($($lit:expr),*) => {
             vec![$(Lit::from_dimacs($lit)),*]
@@ -635,12 +620,16 @@ mod tests {
             clause![4, 5, 6, 7],
             clause![8, 9, 10, 11, 12],
         ];
-        let mut long_clauses = LongClauses::<SolverClauseData>::default();
+        let mut long_clauses = ClauseArena::<TestHeader>::default();
 
         let mut clause_refs = vec![];
 
         for clause_lits in &input_clauses {
-            clause_refs.push(long_clauses.add_clause(SolverClauseData::default(), clause_lits));
+            clause_refs.push(
+                long_clauses
+                    .add_clause(TestHeader::default(), clause_lits)
+                    .unwrap(),
+            );
         }
 
         let mut current_clause = None;
@@ -650,8 +639,11 @@ mod tests {
             assert_eq!(clause_ref, expected_clause_ref);
             assert_eq!(expected_lits, long_clauses.lits(clause_ref));
             assert_eq!(expected_lits, long_clauses.lits_mut(clause_ref));
-            assert_eq!(expected_lits, long_clauses.data_and_lits(clause_ref).1);
-            assert_eq!(expected_lits, long_clauses.data_and_lits_mut(clause_ref).1);
+            assert_eq!(expected_lits, long_clauses.header_and_lits(clause_ref).1);
+            assert_eq!(
+                expected_lits,
+                long_clauses.header_and_lits_mut(clause_ref).1
+            );
         }
         assert_eq!(expected.next(), None);
     }
@@ -665,12 +657,16 @@ mod tests {
             clause![16, 17, 18, 19, 20],
         ];
         let shrunk_lens = &[5, 3, 3, 4];
-        let mut long_clauses = LongClauses::<SolverClauseData>::default();
+        let mut long_clauses = ClauseArena::<TestHeader>::default();
 
         let mut clause_refs = vec![];
 
         for clause_lits in &input_clauses {
-            clause_refs.push(long_clauses.add_clause(SolverClauseData::default(), clause_lits));
+            clause_refs.push(
+                long_clauses
+                    .add_clause(TestHeader::default(), clause_lits)
+                    .unwrap(),
+            );
         }
 
         for ((&clause, &shrunk_len), input_clause) in
@@ -702,12 +698,16 @@ mod tests {
             clause![24, 25, 26],
         ];
         let delete_indices = &[2, 0, 3];
-        let mut long_clauses = LongClauses::<SolverClauseData>::default();
+        let mut long_clauses = ClauseArena::<TestHeader>::default();
 
         let mut clause_refs = vec![];
 
         for clause_lits in &input_clauses {
-            clause_refs.push(long_clauses.add_clause(SolverClauseData::default(), clause_lits));
+            clause_refs.push(
+                long_clauses
+                    .add_clause(TestHeader::default(), clause_lits)
+                    .unwrap(),
+            );
         }
 
         for &index in delete_indices {
@@ -744,12 +744,14 @@ mod tests {
             clause![24, 25, 26],
         ];
 
-        let mut long_clauses = LongClauses::<SolverClauseData>::default();
+        let mut long_clauses = ClauseArena::<TestHeader>::default();
 
         let mut expected_clause_refs = vec![];
 
         for clause_lits in &input_clauses {
-            let clause = long_clauses.add_clause(SolverClauseData::default(), clause_lits);
+            let clause = long_clauses
+                .add_clause(TestHeader::default(), clause_lits)
+                .unwrap();
             if clause_lits[0].index() & 1 != 0 {
                 expected_clause_refs.push(clause);
             }
@@ -783,12 +785,16 @@ mod tests {
             clause![24, 25, 26],
         ];
         let delete_indices = &[2, 0, 3, 5];
-        let mut long_clauses = LongClauses::<SolverClauseData>::default();
+        let mut long_clauses = ClauseArena::<TestHeader>::default();
 
         let mut clause_refs = vec![];
 
         for clause_lits in &input_clauses {
-            clause_refs.push(long_clauses.add_clause(SolverClauseData::default(), clause_lits));
+            clause_refs.push(
+                long_clauses
+                    .add_clause(TestHeader::default(), clause_lits)
+                    .unwrap(),
+            );
         }
 
         for &index in delete_indices {

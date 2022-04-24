@@ -1,3 +1,4 @@
+use quote::quote;
 use syn::{parse_macro_input, DeriveInput};
 
 mod bitfield;
@@ -23,10 +24,10 @@ fn crate_path(name: &str) -> syn::Result<proc_macro2::TokenStream> {
     let found_crate = proc_macro_crate::crate_name(name)
         .map_err(|err| syn::Error::new(proc_macro2::Span::call_site(), err.to_string()))?;
     Ok(match found_crate {
-        proc_macro_crate::FoundCrate::Itself => quote::quote!(crate),
+        proc_macro_crate::FoundCrate::Itself => quote!(crate),
         proc_macro_crate::FoundCrate::Name(name) => {
             let ident = syn::Ident::new(&name, proc_macro2::Span::call_site());
-            quote::quote!( ::#ident )
+            quote!( ::#ident )
         }
     })
 }

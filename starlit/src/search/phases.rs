@@ -2,9 +2,9 @@
 
 use crate::{
     lit::{Lit, Var},
-    tracking::TracksVarCount,
-    trail::BacktrackCallbacks,
-    vec_map::VecMap,
+    prop::trail::BacktrackCallbacks,
+    tracking::Resize,
+    util::vec_map::VecMap,
 };
 
 /// Saves previously assigned phases to reuse them for decisions.
@@ -14,12 +14,8 @@ pub struct Phases {
     saved: VecMap<Var, bool>,
 }
 
-impl TracksVarCount for Phases {
-    fn var_count(&self) -> usize {
-        self.saved.len()
-    }
-
-    fn set_var_count(&mut self, var_count: usize) {
+impl Resize for Phases {
+    fn resize(&mut self, var_count: usize) {
         self.saved.resize(var_count, false);
     }
 }

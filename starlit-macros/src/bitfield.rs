@@ -159,7 +159,6 @@ pub fn derive_bitfield(input: DeriveInput) -> syn::Result<TokenStream> {
     Ok(output)
 }
 
-#[derive(Debug)]
 struct Bitfields(Punctuated<Bitfield, Token![,]>);
 
 impl Parse for Bitfields {
@@ -179,7 +178,6 @@ mod kw {
     syn::custom_keyword!(clamp);
 }
 
-#[derive(Debug)]
 struct Bitfield {
     docs: Vec<DocComment>,
     bits: LitInt,
@@ -213,7 +211,6 @@ impl ToTokens for Bitfield {
     }
 }
 
-#[derive(Debug)]
 struct DocComment {
     pound_token: Token![#],
     bracket_token: token::Bracket,
@@ -259,7 +256,6 @@ impl ToTokens for DocComment {
     }
 }
 
-#[derive(Debug)]
 struct BitfieldAccess {
     arrow_token: Token![=>],
     vis: Visibility,

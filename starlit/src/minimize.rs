@@ -18,10 +18,12 @@
 use std::mem::take;
 
 use crate::{
-    clauses::Clauses,
     lit::Lit,
-    trail::{DecisionLevel, Trail, TrailIndex},
-    vec_map::VecMap,
+    prop::{
+        trail::{DecisionLevel, Trail, TrailIndex},
+        Prop,
+    },
+    util::vec_map::VecMap,
 };
 
 /// Temporary data used during clause minimization.
@@ -42,269 +44,264 @@ pub struct MinimizeClause {
     stack: Vec<StackItem<'static>>,
 }
 
-impl MinimizeClause {
-    /// Removes redundant literals from a clause derived during conflict analysis.
-    ///
-    /// Returns the backtracking level that makes the clause propagating.
-    pub fn minimize(
-        &mut self,
-        clause: &mut Vec<Lit>,
-        trail: &Trail,
-        clauses: &Clauses,
-    ) -> DecisionLevel {
-        // Resize temporary buffers if necessary
-        if self.first_on_level.len() <= trail.decision_level().0 as usize {
-            self.first_on_level.resize(
-                trail.decision_level().0 as usize + 1,
-                TrailIndex::UNASSIGNED,
-            );
-        }
-
-        self.first_on_level[DecisionLevel::TOP] = TrailIndex(0);
-
-        if self.cache.len() <= trail.steps().len() {
-            self.cache.resize(trail.steps().len(), None);
-        }
-
-        // Sort the clause literals chronologically
-        clause.sort_unstable_by_key(|lit| trail.trail_index(lit.var()));
-
-        let propagated = clause.pop().unwrap(); // Don't minimize the propagated literal
-
-        clause.retain(|&lit| {
-            let index = trail.trail_index(lit.var());
-            let level = trail.steps()[index].decision_level;
-            let retain = if self.first_on_level[level] > index {
-                // The first literal of each decision level in the clause cannot be redundant
-                self.first_on_level[level] = index;
-                true
-            } else {
-                !self.literal_index_is_redundant_rec_uncached(index, trail, clauses, 0)
-            };
-
-            // After retaining a literal, it is redundant wrt to the retained literals even if it
-            // wasn't before.
-            self.cache[index] = Some(true);
-            self.to_clean.push(index);
-            retain
-        });
-
-        clause.push(propagated);
-
-        // Clean up temporary buffers for the next minimization
-        for index in self.to_clean.drain(..) {
-            self.cache[index] = None;
-        }
-
-        for &lit in clause.iter() {
-            let index = trail.trail_index(lit.var());
-            let level = trail.steps()[index].decision_level;
-
-            self.first_on_level[level] = TrailIndex::UNASSIGNED;
-        }
-
-        // Reverse the clause so the propagated literal is first and a literal of the backtrack
-        // level is second.
-        clause.reverse();
-        trail.step_for_var(clause[1].var()).decision_level
+/// Removes redundant literals from a clause derived during conflict analysis.
+///
+/// Returns the backtracking level that makes the clause propagating.
+pub fn minimize(
+    minimize: &mut MinimizeClause,
+    clause: &mut Vec<Lit>,
+    prop: &Prop,
+) -> DecisionLevel {
+    // Resize temporary buffers if necessary
+    if minimize.first_on_level.len() <= prop.trail.decision_level().0 as usize {
+        minimize.first_on_level.resize(
+            prop.trail.decision_level().0 as usize + 1,
+            TrailIndex::UNASSIGNED,
+        );
     }
 
-    /// Returns a cached (or trivial) result for `is_redundant_literal_index_rec`
-    ///
-    /// Trivial cases are top-level assignments, which are always redundant, and assignments that
-    /// precede all clause literals on the same level, which are never redundant.
-    fn literal_index_is_redundant_cached(
-        &mut self,
-        index: TrailIndex,
-        trail: &Trail,
-    ) -> Option<bool> {
-        self.cache[index].or_else(|| {
-            let step = &trail.steps()[index];
-            let level = step.decision_level;
-            if self.first_on_level[level] > index {
-                // Assignments before the first clause literal on the same level cannot be implied
-                // by clause literals. This includes literals on levels with no clause literals.
+    minimize.first_on_level[DecisionLevel::TOP] = TrailIndex(0);
 
-                // This combines all three "Poison Criteria", as well as the decision check of
-                // ["Efficient All-UIP Learned Clause
-                // Minimization"](https://doi.org/10.1007/978-3-030-80223-3_12) into a single check.
-                Some(false)
-            } else if level == DecisionLevel::TOP {
-                Some(true)
-            } else {
-                None
-            }
-        })
+    if minimize.cache.len() <= prop.trail.steps().len() {
+        minimize.cache.resize(prop.trail.steps().len(), None);
     }
 
-    /// Performs a depth-first search with lookahead to check whether the assignment at trail
-    /// `index` is implied by (other) literals of the clause.
-    ///
-    /// This caches positive as well as negative results to ensure an overall linear runtime.
-    fn literal_index_is_redundant_rec(
-        &mut self,
-        index: TrailIndex,
-        trail: &Trail,
-        clauses: &Clauses,
-        depth: usize,
-    ) -> bool {
-        // Check for a cached or trivial result
-        if let Some(cached) = self.literal_index_is_redundant_cached(index, trail) {
-            return cached;
-        }
-        self.literal_index_is_redundant_rec_uncached(index, trail, clauses, depth)
-    }
+    // Sort the clause literals chronologically
+    clause.sort_unstable_by_key(|lit| prop.trail.trail_index(lit.var()));
 
-    /// The same as `is_redundant_literal_index_rec`, but does not perform a cache lookup for the
-    /// outermost call.
-    fn literal_index_is_redundant_rec_uncached(
-        &mut self,
-        index: TrailIndex,
-        trail: &Trail,
-        clauses: &Clauses,
-        depth: usize,
-    ) -> bool {
-        let reason_lits = trail.steps()[index].reason.lits(clauses);
+    let propagated = clause.pop().unwrap(); // Don't minimize the propagated literal
 
-        // We perform a lookahead using cached/trivial values of depth 1 and only recurse if that is
-        // not enough to determine the redundancy of the literal at the queried `index`.
-        let mut all_true = true;
-        for &reason_lit in reason_lits {
-            let reason_index = trail.trail_index(reason_lit.var());
-            match self.literal_index_is_redundant_cached(reason_index, trail) {
-                Some(false) => {
-                    self.cache[index] = Some(false);
-                    self.to_clean.push(index);
-                    return false;
-                }
-                Some(true) => (),
-                None => all_true = false,
-            }
-        }
-
-        if !all_true {
-            // When there were reason literals of unknown redundancy, recurse
-
-            if depth > 20 {
-                // To avoid stack overflows, at a certain depth, we switch to the slightly slower
-                // iterative version.
-                return self.literal_index_is_redundant_iter(index, reason_lits, trail, clauses);
-            }
-
-            for &reason_lit in reason_lits {
-                let reason_index = trail.trail_index(reason_lit.var());
-                if !self.literal_index_is_redundant_rec(reason_index, trail, clauses, depth + 1) {
-                    self.cache[index] = Some(false);
-                    self.to_clean.push(index);
-                    return false;
-                }
-            }
-        }
-
-        self.cache[index] = Some(true);
-        self.to_clean.push(index);
-        true
-    }
-
-    /// An iterative version of `Self::is_redundant_literal_index_rec`.
-    #[cold] // Only used as fallback
-    fn literal_index_is_redundant_iter(
-        &mut self,
-        index: TrailIndex,
-        reason_lits: &[Lit],
-        trail: &Trail,
-        clauses: &Clauses,
-    ) -> bool {
-        // This goes through the exact same steps as the recursive version, except for skipping the
-        // initial checks for the outermost call (see where it is invoked from the recursive
-        // version) and for that it manually manages a stack instead of using the call stack. See
-        // the recursive version for comments.
-
-        self.stack.clear(); // no-op to make this safe unconditionally
-        let mut stack: Vec<StackItem> = unsafe {
-            // SAFETY stack is empty and we only transmute the lifetime
-            std::mem::transmute(take(&mut self.stack))
+    clause.retain(|&lit| {
+        let index = prop.trail.trail_index(lit.var());
+        let level = prop.trail.steps()[index].decision_level;
+        let retain = if minimize.first_on_level[level] > index {
+            // The first literal of each decision level in the clause cannot be redundant
+            minimize.first_on_level[level] = index;
+            true
+        } else {
+            !literal_index_is_redundant_rec_uncached(minimize, index, prop, 0)
         };
 
-        macro_rules! return_false {
-            () => {
-                for item in stack.drain(..) {
-                    self.cache[item.index] = Some(false);
-                    self.to_clean.push(item.index);
-                }
+        // After retaining a literal, it is redundant wrt to the retained literals even if it
+        // wasn't before.
+        minimize.cache[index] = Some(true);
+        minimize.to_clean.push(index);
+        retain
+    });
 
-                self.stack = unsafe {
-                    // SAFETY stack is empty and we only transmute the lifetime
-                    std::mem::transmute(stack)
-                };
+    clause.push(propagated);
 
+    // Clean up temporary buffers for the next minimization
+    for index in minimize.to_clean.drain(..) {
+        minimize.cache[index] = None;
+    }
+
+    for &lit in clause.iter() {
+        let index = prop.trail.trail_index(lit.var());
+        let level = prop.trail.steps()[index].decision_level;
+
+        minimize.first_on_level[level] = TrailIndex::UNASSIGNED;
+    }
+
+    // Reverse the clause so the propagated literal is first and a literal of the backtrack
+    // level is second.
+    clause.reverse();
+    prop.trail.step_for_var(clause[1].var()).decision_level
+}
+
+/// Returns a cached (or trivial) result for `is_redundant_literal_index_rec`
+///
+/// Trivial cases are top-level assignments, which are always redundant, and assignments that
+/// precede all clause literals on the same level, which are never redundant.
+fn literal_index_is_redundant_cached(
+    minimize: &mut MinimizeClause,
+    index: TrailIndex,
+    trail: &Trail,
+) -> Option<bool> {
+    minimize.cache[index].or_else(|| {
+        let step = &trail.steps()[index];
+        let level = step.decision_level;
+        if minimize.first_on_level[level] > index {
+            // Assignments before the first clause literal on the same level cannot be implied
+            // by clause literals. This includes literals on levels with no clause literals.
+
+            // This combines all three "Poison Criteria", as well as the decision check of
+            // ["Efficient All-UIP Learned Clause
+            // Minimization"](https://doi.org/10.1007/978-3-030-80223-3_12) into a single check.
+            Some(false)
+        } else if level == DecisionLevel::TOP {
+            Some(true)
+        } else {
+            None
+        }
+    })
+}
+
+/// Performs a depth-first search with lookahead to check whether the assignment at trail
+/// `index` is implied by (other) literals of the clause.
+///
+/// This caches positive as well as negative results to ensure an overall linear runtime.
+fn literal_index_is_redundant_rec(
+    minimize: &mut MinimizeClause,
+    index: TrailIndex,
+    prop: &Prop,
+    depth: usize,
+) -> bool {
+    // Check for a cached or trivial result
+    if let Some(cached) = literal_index_is_redundant_cached(minimize, index, &prop.trail) {
+        return cached;
+    }
+    literal_index_is_redundant_rec_uncached(minimize, index, prop, depth)
+}
+
+/// The same as `is_redundant_literal_index_rec`, but does not perform a cache lookup for the
+/// outermost call.
+fn literal_index_is_redundant_rec_uncached(
+    minimize: &mut MinimizeClause,
+    index: TrailIndex,
+    prop: &Prop,
+    depth: usize,
+) -> bool {
+    let reason_lits = prop.trail.steps()[index].reason.lits(prop);
+
+    // We perform a lookahead using cached/trivial values of depth 1 and only recurse if that is
+    // not enough to determine the redundancy of the literal at the queried `index`.
+    let mut all_true = true;
+    for &reason_lit in reason_lits {
+        let reason_index = prop.trail.trail_index(reason_lit.var());
+        match literal_index_is_redundant_cached(minimize, reason_index, &prop.trail) {
+            Some(false) => {
+                minimize.cache[index] = Some(false);
+                minimize.to_clean.push(index);
                 return false;
-            };
+            }
+            Some(true) => (),
+            None => all_true = false,
+        }
+    }
+
+    if !all_true {
+        // When there were reason literals of unknown redundancy, recurse
+
+        if depth > 20 {
+            // To avoid stack overflows, at a certain depth, we switch to the slightly slower
+            // iterative version.
+            return literal_index_is_redundant_iter(minimize, index, reason_lits, prop);
         }
 
-        // Keeping the top of the stack in a local variable that is updated when pushing/popping is
-        // faster than popping and pushing on every iteration
-        let mut top = StackItem { index, reason_lits };
+        for &reason_lit in reason_lits {
+            let reason_index = prop.trail.trail_index(reason_lit.var());
+            if !literal_index_is_redundant_rec(minimize, reason_index, prop, depth + 1) {
+                minimize.cache[index] = Some(false);
+                minimize.to_clean.push(index);
+                return false;
+            }
+        }
+    }
 
-        loop {
-            while let Some((&lit, rest)) = top.reason_lits.split_first() {
-                top.reason_lits = rest;
+    minimize.cache[index] = Some(true);
+    minimize.to_clean.push(index);
+    true
+}
 
-                let index = trail.trail_index(lit.var());
+/// An iterative version of `Self::is_redundant_literal_index_rec`.
+#[cold] // Only used as fallback
+fn literal_index_is_redundant_iter(
+    minimize: &mut MinimizeClause,
+    index: TrailIndex,
+    reason_lits: &[Lit],
+    prop: &Prop,
+) -> bool {
+    // This goes through the exact same steps as the recursive version, except for skipping the
+    // initial checks for the outermost call (see where it is invoked from the recursive
+    // version) and for that it manually manages a stack instead of using the call stack. See
+    // the recursive version for comments.
 
-                match self.literal_index_is_redundant_cached(index, trail) {
-                    Some(true) => continue,
+    minimize.stack.clear(); // no-op to make this safe unconditionally
+    let mut stack: Vec<StackItem> = unsafe {
+        // SAFETY stack is empty and we only transmute the lifetime
+        std::mem::transmute(take(&mut minimize.stack))
+    };
 
-                    Some(false) => {
-                        self.cache[top.index] = Some(false);
-                        self.to_clean.push(top.index);
-                        return_false!();
-                    }
-                    None => {
-                        let reason_lits = trail.steps()[index].reason.lits(clauses);
-                        let mut all_true = true;
-                        for &reason_lit in reason_lits {
-                            let reason_index = trail.trail_index(reason_lit.var());
-                            match self.literal_index_is_redundant_cached(reason_index, trail) {
-                                Some(false) => {
-                                    self.cache[index] = Some(false);
-                                    self.to_clean.push(index);
-                                    self.cache[top.index] = Some(false);
-                                    self.to_clean.push(top.index);
-                                    return_false!();
-                                }
-                                Some(true) => (),
-                                None => all_true = false,
+    macro_rules! return_false {
+        () => {
+            for item in stack.drain(..) {
+                minimize.cache[item.index] = Some(false);
+                minimize.to_clean.push(item.index);
+            }
+
+            minimize.stack = unsafe {
+                // SAFETY stack is empty and we only transmute the lifetime
+                std::mem::transmute(stack)
+            };
+
+            return false;
+        };
+    }
+
+    // Keeping the top of the stack in a local variable that is updated when pushing/popping is
+    // faster than popping and pushing on every iteration
+    let mut top = StackItem { index, reason_lits };
+
+    loop {
+        while let Some((&lit, rest)) = top.reason_lits.split_first() {
+            top.reason_lits = rest;
+
+            let index = prop.trail.trail_index(lit.var());
+
+            match literal_index_is_redundant_cached(minimize, index, &prop.trail) {
+                Some(true) => continue,
+
+                Some(false) => {
+                    minimize.cache[top.index] = Some(false);
+                    minimize.to_clean.push(top.index);
+                    return_false!();
+                }
+                None => {
+                    let reason_lits = prop.trail.steps()[index].reason.lits(prop);
+                    let mut all_true = true;
+                    for &reason_lit in reason_lits {
+                        let reason_index = prop.trail.trail_index(reason_lit.var());
+                        match literal_index_is_redundant_cached(minimize, reason_index, &prop.trail)
+                        {
+                            Some(false) => {
+                                minimize.cache[index] = Some(false);
+                                minimize.to_clean.push(index);
+                                minimize.cache[top.index] = Some(false);
+                                minimize.to_clean.push(top.index);
+                                return_false!();
                             }
+                            Some(true) => (),
+                            None => all_true = false,
                         }
-                        if all_true {
-                            self.cache[index] = Some(true);
-                            self.to_clean.push(index);
-                        } else {
-                            stack.push(std::mem::replace(
-                                &mut top,
-                                StackItem { index, reason_lits },
-                            ));
-                        }
+                    }
+                    if all_true {
+                        minimize.cache[index] = Some(true);
+                        minimize.to_clean.push(index);
+                    } else {
+                        stack.push(std::mem::replace(
+                            &mut top,
+                            StackItem { index, reason_lits },
+                        ));
                     }
                 }
             }
-            self.cache[top.index] = Some(true);
-            self.to_clean.push(top.index);
-            if let Some(new_top) = stack.pop() {
-                top = new_top;
-            } else {
-                break;
-            }
         }
-
-        self.stack = unsafe {
-            // SAFETY stack is empty and we only transmute the lifetime
-            std::mem::transmute(stack)
-        };
-
-        true
+        minimize.cache[top.index] = Some(true);
+        minimize.to_clean.push(top.index);
+        if let Some(new_top) = stack.pop() {
+            top = new_top;
+        } else {
+            break;
+        }
     }
+
+    minimize.stack = unsafe {
+        // SAFETY stack is empty and we only transmute the lifetime
+        std::mem::transmute(stack)
+    };
+
+    true
 }
 
 /// Stack item for the iterative DFS fallback.

@@ -1,11 +1,15 @@
 //! Helper traits for conversion of types that are transparent wrappers over a storage type.
 
+use std::mem::MaybeUninit;
+
 /// A type using an underlying storage type as representation in memory.
 ///
 /// # Safety
 /// Every value of a type implementing this must also be a valid value for the storage type. The
 /// converse does not have to hold.
 pub unsafe trait Transparent: Sized + ConvertStorage {}
+
+pub use starlit_macros::Transparent;
 
 /// Conversion of [`Transparent`] types to their underlying storage.
 pub trait ConvertStorage {
@@ -22,6 +26,30 @@ pub trait ConvertStorage {
     /// implementing type. See the documentation of the implementing type for details.
     unsafe fn from_storage_unchecked(storage: Self::Storage) -> Self;
 }
+
+impl<T, const LEN: usize> ConvertStorage for [T; LEN]
+where
+    T: Transparent,
+{
+    type Storage = [T::Storage; LEN];
+
+    #[inline(always)]
+    fn into_storage(self) -> Self::Storage {
+        unsafe {
+            MaybeUninit::new(self)
+                .as_ptr()
+                .cast::<Self::Storage>()
+                .read()
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn from_storage_unchecked(storage: Self::Storage) -> Self {
+        MaybeUninit::new(storage).as_ptr().cast::<Self>().read()
+    }
+}
+
+unsafe impl<T, const LEN: usize> Transparent for [T; LEN] where T: Transparent {}
 
 /// Conversion of [`Transparent`] types to their underlying storage.
 pub trait ConvertStorageMut {

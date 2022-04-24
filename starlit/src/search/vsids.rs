@@ -39,10 +39,8 @@
 //! already assigned, but unassigned variables are added eagerly, i.e. as soon as they are
 //! unassigned.
 use crate::{
-    heap::MaxHeap,
-    lit::Var,
-    tracking::TracksVarCount,
-    trail::{BacktrackCallbacks, PartialAssignment},
+    heap::MaxHeap, lit::Var, partial_assignment::PartialAssignment,
+    prop::trail::BacktrackCallbacks, tracking::Resize,
 };
 
 const RESCALE_LIMIT: f32 = std::f32::MAX / 16.0;
@@ -74,12 +72,8 @@ impl BacktrackCallbacks for Vsids {
     }
 }
 
-impl TracksVarCount for Vsids {
-    fn var_count(&self) -> usize {
-        self.activity.len()
-    }
-
-    fn set_var_count(&mut self, var_count: usize) {
+impl Resize for Vsids {
+    fn resize(&mut self, var_count: usize) {
         self.activity.resize_enqueued(var_count, 0);
     }
 }
