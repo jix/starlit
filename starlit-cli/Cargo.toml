@@ -7,6 +7,10 @@ license = "0BSD"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[bin]]
+name = "starlit"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = "1.0.56"
 flussab-cnf = "0.3.0"
