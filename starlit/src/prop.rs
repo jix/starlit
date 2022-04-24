@@ -22,7 +22,6 @@ pub mod watch;
 #[allow(missing_docs)]
 pub struct Prop {
     pub unsat: bool,
-    pub error: bool,
     pub values: PartialAssignment,
     pub binary: BinaryClauses,
     pub long: LongClauses,
@@ -57,10 +56,6 @@ pub enum AddedClause {
 ///
 /// This can break solver invariants.
 pub fn add_clause_verbatim(prop: &mut Prop, header: LongHeader, lits: &[Lit]) -> AddedClause {
-    if prop.unsat {
-        return AddedClause::Empty;
-    }
-
     match *lits {
         [] => {
             prop.unsat = true;
@@ -85,17 +80,12 @@ pub fn add_clause_verbatim(prop: &mut Prop, header: LongHeader, lits: &[Lit]) ->
             prop.binary.add_clause([a, b]);
             AddedClause::Binary([a, b])
         }
-        [a, b, ..] => match prop.long.add_clause(header, lits) {
-            Ok(clause) => {
-                prop.watches.watch_clause(clause, [a, b]);
-                AddedClause::Long(clause)
-            }
-            Err(_) => {
-                prop.unsat = true;
-                prop.error = true;
-                AddedClause::Empty
-            }
-        },
+        [a, b, ..] => {
+            // TODO handle full clause arena
+            let clause = prop.long.add_clause(header, lits).unwrap();
+            prop.watches.watch_clause(clause, [a, b]);
+            AddedClause::Long(clause)
+        }
     }
 }
 
