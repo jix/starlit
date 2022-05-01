@@ -1,11 +1,15 @@
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote, quote_spanned, ToTokens};
 use syn::{
-    bracketed, parse::Parse, punctuated::Punctuated, spanned::Spanned, token, DeriveInput, LitInt,
-    LitStr, Member, Token, Type, Visibility,
+    bracketed,
+    parse::{Parse, ParseStream},
+    punctuated::Punctuated,
+    spanned::Spanned,
+    token, DeriveInput, LitInt, LitStr, Member, Token, Type, Visibility,
 };
 
-pub fn derive_bitfield(input: DeriveInput) -> syn::Result<TokenStream> {
+pub fn derive_bitfield(input: ParseStream) -> syn::Result<TokenStream> {
+    let input: DeriveInput = input.parse()?;
     let name = input.ident;
 
     let struct_data = match input.data {

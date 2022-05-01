@@ -1,77 +1,64 @@
-//! Complete SAT solver interface.
-//!
-//! Groups all components necessary for the solver.
+//! SAT solver entrypoint.
 use crate::{
-    search::{restart, search_step, Search},
+    context::Ctx,
+    lit::Lit,
+    log::HasLogger,
+    prop::{add_clause_verbatim, long::LongHeader},
+    state::{schedule_search_step, State},
     tracking::Resize,
 };
 
-use self::{luby::LubySequence, reduce::reduce};
-
-mod luby;
-mod reduce;
-
-/// Contains all components of a SAT solver.
+/// A complete SAT solver.
 #[derive(Default)]
 #[allow(missing_docs)]
 pub struct Solver {
-    pub search: Search,
-    pub schedule: Schedule,
-}
-
-impl Resize for Solver {
-    fn resize(&mut self, var_count: usize) {
-        self.search.resize(var_count)
-    }
+    pub ctx: Ctx,
+    pub state: State,
 }
 
 impl Solver {
+    /// Adds a clause to the current formula.
+    pub fn add_clause(&mut self, clause: &[Lit]) {
+        // TODO this is just a temporary hack
+
+        let var_count = clause
+            .iter()
+            .map(|lit| lit.index() + 1)
+            .max()
+            .unwrap_or_default();
+        if self.state.search.prop.var_count < var_count {
+            self.state.resize(var_count);
+        }
+
+        add_clause_verbatim(
+            &mut self.state.search.prop,
+            LongHeader::new_input_clause(),
+            clause,
+        );
+    }
+
     /// Determines whether the current formula is satisfiable.
     pub fn solve(&mut self) -> bool {
         loop {
-            if self.schedule.should_restart(&self.search) {
-                restart(&mut self.search);
+            if let Some(result) = schedule_search_step(&mut self.ctx, &mut self.state) {
+                return result;
             }
+        }
+    }
 
-            if self.schedule.should_reduce(&self.search) {
-                reduce(&mut self.search);
-            }
-
-            if let Some(verdict) = search_step(&mut self.search) {
-                return verdict;
-            }
+    /// Returns the value assigned to a literal.
+    pub fn value(&self, lit: Lit) -> Option<bool> {
+        if lit.index() < self.state.search.prop.var_count {
+            self.state.search.prop.values.value(lit)
+        } else {
+            None
         }
     }
 }
 
-/// Restart and reduce schedule.
-#[derive(Default)]
-pub struct Schedule {
-    next_restart: u64,
-    restart_schedule: LubySequence,
-
-    next_reduce: u64,
-    reductions: u64,
-}
-
-impl Schedule {
-    /// Returns whether the search should restart.
-    fn should_restart(&mut self, search: &Search) -> bool {
-        let restart = search.stats.conflicts >= self.next_restart;
-        if restart {
-            // TODO make scale configurable
-            self.next_restart = search.stats.conflicts + self.restart_schedule.advance() * 512;
-        }
-        restart
-    }
-
-    /// Returns whether the clause database should be reduced.
-    fn should_reduce(&mut self, search: &Search) -> bool {
-        let reduce = search.stats.conflicts >= self.next_reduce;
-        if reduce {
-            self.reductions += 1;
-            self.next_reduce += (2000.0 * (self.reductions as f64).sqrt()) as u64;
-        }
-        reduce
+impl HasLogger for Solver {
+    #[inline(always)]
+    fn logger(&self) -> &crate::log::Logger {
+        self.ctx.logger()
     }
 }

@@ -3,6 +3,7 @@ use std::mem::replace;
 
 use crate::{
     clause_arena::ClauseRef,
+    context::Ctx,
     glue::compute_glue,
     lit::{Lit, Var},
     minimize,
@@ -79,6 +80,7 @@ impl ConflictAnalysis {
 ///
 /// This only propagates a single new literal and needs to be followed by unit propagation.
 pub fn analyze_conflict(
+    ctx: &mut Ctx,
     analysis: &mut ConflictAnalysis,
     prop: &mut Prop,
     conflict: ConflictClause,
@@ -86,7 +88,7 @@ pub fn analyze_conflict(
 ) {
     assert_ne!(prop.trail.decision_level(), DecisionLevel::TOP);
 
-    derive_1uip_clause(analysis, prop, conflict, callbacks);
+    derive_1uip_clause(ctx, analysis, prop, conflict, callbacks);
     callbacks.analyzed_conflict();
 
     // TODO make this configurable
@@ -96,7 +98,7 @@ pub fn analyze_conflict(
         prepare_for_backtracking(analysis, prop)
     };
 
-    backtrack_to_level(prop, backtrack_level, callbacks);
+    backtrack_to_level(ctx, prop, backtrack_level, callbacks);
 
     learn_and_assign(analysis, prop);
 }
@@ -106,6 +108,7 @@ pub fn analyze_conflict(
 /// The derived clause is stored in `self.data.derived_clause`. The UIP will be the last literal
 /// of the derived clause.
 fn derive_1uip_clause(
+    ctx: &mut Ctx,
     analysis: &mut ConflictAnalysis,
     prop: &mut Prop,
     conflict: ConflictClause,
@@ -184,7 +187,7 @@ fn derive_1uip_clause(
 
     assert_eq!(analysis.current_level_lit_count, 0);
 
-    tracing::trace!(clause = ?analysis.derived_clause, "1-uip");
+    trace!(ctx, "1-uip", clause = analysis.derived_clause);
 }
 
 fn bump_long_clause(
@@ -358,7 +361,7 @@ mod tests {
 
         let conflict = propagate(&mut prop).unwrap_err();
 
-        analyze_conflict(&mut data, &mut prop, conflict, &mut ());
+        analyze_conflict(&mut Ctx::default(), &mut data, &mut prop, conflict, &mut ());
 
         assert_eq!(data.derived_clause, &clause![-1]);
 
@@ -392,7 +395,7 @@ mod tests {
 
         let conflict = propagate(&mut prop).unwrap_err();
 
-        analyze_conflict(&mut data, &mut prop, conflict, &mut ());
+        analyze_conflict(&mut Ctx::default(), &mut data, &mut prop, conflict, &mut ());
 
         propagate(&mut prop).ok().unwrap();
 
@@ -427,7 +430,7 @@ mod tests {
 
         let conflict = propagate(&mut prop).unwrap_err();
 
-        analyze_conflict(&mut data, &mut prop, conflict, &mut ());
+        analyze_conflict(&mut Ctx::default(), &mut data, &mut prop, conflict, &mut ());
 
         propagate(&mut prop).ok().unwrap();
 

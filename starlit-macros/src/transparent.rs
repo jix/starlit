@@ -1,10 +1,11 @@
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, ToTokens};
-use syn::{DeriveInput, Path, Token};
+use syn::{parse::ParseStream, DeriveInput, Path, Token};
 
 use crate::crate_path;
 
-pub fn derive_transparent(input: DeriveInput) -> syn::Result<TokenStream> {
+pub fn derive_transparent(input: ParseStream) -> syn::Result<TokenStream> {
+    let input: DeriveInput = input.parse()?;
     let name = input.ident;
 
     let struct_data = match input.data {

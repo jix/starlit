@@ -1,6 +1,7 @@
 //! Stores a history of steps performed during the search to enable backtracking.
 use crate::{
     clause_arena::{ClauseRef, ClauseRefGcMap},
+    context::Ctx,
     lit::{Lit, LitIdx, Var},
     partial_assignment::PartialAssignment,
     tracking::Resize,
@@ -259,11 +260,17 @@ impl BacktrackCallbacks for () {}
 ///
 /// Panics if the target decision level is the current decision level or higher.
 pub fn backtrack_to_level(
+    ctx: &mut Ctx,
     prop: &mut Prop,
     decision_level: DecisionLevel,
     callbacks: &mut impl BacktrackCallbacks,
 ) {
-    // tracing::trace!(?decision_level, "backtrack");
+    trace!(
+        ctx,
+        "backtrack",
+        from = prop.trail.decision_level(),
+        to = decision_level,
+    );
     assert!(decision_level < prop.trail.decision_level());
 
     // Get the index corresponding to the lowest decision to undo

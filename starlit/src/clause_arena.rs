@@ -525,6 +525,24 @@ where
     pub fn should_collect_garbage(&self) -> bool {
         self.garbage_count * 2 >= self.buffer.len()
     }
+
+    /// Returns the length of the allocated buffer and the number of words used for clause storage.
+    pub fn utilization(&self) -> Utilization {
+        let allocated = self.buffer.len();
+        Utilization {
+            allocated,
+            used: allocated - self.garbage_count,
+        }
+    }
+}
+
+/// Length of the allocated buffer and the number of words used for clause storage.
+#[derive(Debug)]
+pub struct Utilization {
+    /// Length of the allocated buffer.
+    pub allocated: usize,
+    /// Number of words used for clause storage.
+    pub used: usize,
 }
 
 /// Used to update [`ClauseRef`] values after [`ClauseArena::collect_garbage`].

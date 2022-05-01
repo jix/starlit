@@ -55,6 +55,20 @@ impl PartialAssignment {
     pub fn is_assigned(&self, var: Var) -> bool {
         self.assigned[var] != (var.index() * 2) as u8 ^ 2
     }
+
+    /// Returns the value of a literal.
+    ///
+    /// Prefer a single [`is_true`][Self::is_true], [`is_false`][Self::is_false] or
+    /// [`is_assigned`][Self::is_assigned] over calling this and comparing the result. (As of this
+    /// writing, rustc fails to properly optimize comparisons of `Option<bool>` values.)
+    #[inline(always)]
+    pub fn value(&self, lit: Lit) -> Option<bool> {
+        match self.assigned[lit] ^ lit.code() as u8 {
+            0 => Some(true),
+            1 => Some(false),
+            _ => None,
+        }
+    }
 }
 
 impl Resize for PartialAssignment {

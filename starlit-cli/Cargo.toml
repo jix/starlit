@@ -13,8 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.56"
+clap = { version = "3.1.14", features = ["derive"] }
 flussab-cnf = "0.3.0"
 mimalloc = { version = "0.1.28", default-features = false }
 starlit = { version = "0.1.0", path = "../starlit" }
-tracing = "0.1.34"
-tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }

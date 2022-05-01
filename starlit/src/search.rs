@@ -1,6 +1,8 @@
 //! CDCL search data structures.
+
 use crate::{
     conflict_analysis::{analyze_conflict, ConflictAnalysis, ConflictAnalysisCallbacks},
+    context::Ctx,
     lit::{Lit, Var},
     prop::{
         collect_garbage,
@@ -36,11 +38,11 @@ impl Resize for Search {
 }
 
 /// Performs one step of CDCL search and returns whether the formula is satisfiable.
-pub fn search_step(search: &mut Search) -> Option<bool> {
+pub fn search_step(ctx: &mut Ctx, search: &mut Search) -> Option<bool> {
     if search.prop.unsat {
         return Some(false);
     }
-    collect_garbage(&mut search.prop);
+    collect_garbage(ctx, &mut search.prop);
 
     let previously_propagated = search.prop.trail.propagated();
 
@@ -52,12 +54,13 @@ pub fn search_step(search: &mut Search) -> Option<bool> {
         if search.prop.trail.decision_level() == DecisionLevel::TOP {
             search.prop.unsat = true;
             // Conflict without any assumptions means the formula is UNSAT
-            tracing::debug!("UNSAT");
+            verbose!(ctx, "unsatisfiable");
             return Some(false);
         }
         // Otherwise we can learn an asserting clause and backtrack to the level where it turns from
         // in-conflict to asserting.
         analyze_conflict(
+            ctx,
             &mut search.conflict_analysis,
             &mut search.prop,
             conflict,
@@ -71,12 +74,12 @@ pub fn search_step(search: &mut Search) -> Option<bool> {
         // decision.
         search.stats.decisions += 1;
         let lit = search.phases.decide_phase(var);
-        tracing::trace!(?lit, "decision");
+        trace!(ctx, decision = lit);
         assign_decision(&mut search.prop, lit);
     } else {
         // All variables are assigned and unit propagation reported no conflict so the
         // current assignment is a full satisfying assignment.
-        tracing::debug!("SAT");
+        verbose!(ctx, "satisfiable");
         return Some(true);
     }
 
@@ -106,10 +109,12 @@ impl<'a> ConflictAnalysisCallbacks for Callbacks<'a> {
 }
 
 /// Performs a restart by backtracking to decision level 0.
-pub fn restart(search: &mut Search) {
-    tracing::debug!("restart");
+pub fn restart(ctx: &mut Ctx, search: &mut Search) {
+    debug!(ctx, "restart");
+
     if search.prop.trail.decision_level() > DecisionLevel::TOP {
         backtrack_to_level(
+            ctx,
             &mut search.prop,
             DecisionLevel::TOP,
             &mut Callbacks {

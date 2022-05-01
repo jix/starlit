@@ -1,7 +1,8 @@
 //! Solver components for propagation and backtracking.
 
 use crate::{
-    clause_arena::ClauseRefGcMap, lit::Lit, partial_assignment::PartialAssignment, tracking::Resize,
+    clause_arena::ClauseRefGcMap, context::Ctx, lit::Lit, partial_assignment::PartialAssignment,
+    tracking::Resize,
 };
 
 use self::{
@@ -21,6 +22,7 @@ pub mod watch;
 #[derive(Default)]
 #[allow(missing_docs)]
 pub struct Prop {
+    pub var_count: usize,
     pub unsat: bool,
     pub values: PartialAssignment,
     pub binary: BinaryClauses,
@@ -31,6 +33,7 @@ pub struct Prop {
 
 impl Resize for Prop {
     fn resize(&mut self, var_count: usize) {
+        self.var_count = var_count;
         self.values.resize(var_count);
         self.binary.resize(var_count);
         self.watches.resize(var_count);
@@ -46,7 +49,7 @@ pub enum AddedClause {
     Unit(Lit),
     /// A reference to a binary clause, represented as the two contained literals.
     ///
-    /// The order is the same as in the literals passed to [`Clauses::add_clause`].
+    /// The order is the same as in the literals passed to [`add_clause_verbatim`].
     Binary([Lit; 2]),
     /// A reference to a long clause.
     Long(ClauseRef),
@@ -109,15 +112,16 @@ impl ConflictClause {
 }
 
 /// Perfoms garbage collection when necessary.
-pub fn collect_garbage(prop: &mut Prop) -> Option<ClauseRefGcMap> {
+pub fn collect_garbage(ctx: &mut Ctx, prop: &mut Prop) -> Option<ClauseRefGcMap> {
     prop.long
         .should_collect_garbage()
-        .then(|| collect_garbage_now(prop))
+        .then(|| collect_garbage_now(ctx, prop))
 }
 
 /// Unconditionally performs garbage collection.
-fn collect_garbage_now(prop: &mut Prop) -> ClauseRefGcMap {
-    tracing::debug!("garbage collection");
+fn collect_garbage_now(ctx: &mut Ctx, prop: &mut Prop) -> ClauseRefGcMap {
+    debug!(ctx, "garbage collection", prop.long.utilization());
+
     let gc_map = prop.long.collect_garbage();
 
     prop.trail.update_clause_references(&gc_map);

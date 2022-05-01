@@ -2,7 +2,7 @@
 
 use starlit_macros::Bitfield;
 
-use crate::{prop::trail::Reason, search::Search};
+use crate::{context::Ctx, prop::trail::Reason, search::Search};
 
 /// Reduction score.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Bitfield)]
@@ -17,8 +17,8 @@ struct Score(
 );
 
 /// Performs clause database reduction.
-pub fn reduce(search: &mut Search) {
-    tracing::debug!("reduce");
+pub fn reduce(ctx: &mut Ctx, search: &mut Search) {
+    debug!(ctx, "reduce");
     protect_clauses(search, true);
 
     let mut deletion_candidates = vec![];

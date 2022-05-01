@@ -1,52 +1,52 @@
-use std::io::Write;
-
+use clap::Parser;
 use mimalloc::MiMalloc;
 use starlit::{
-    lit::{Lit, Var},
-    prop::{add_clause_verbatim, long::LongHeader},
-    tracking::Resize,
+    lit::Lit,
+    log::{info, LogLevel},
 };
-use tracing_subscriber::fmt::MakeWriter;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
-struct CommentWriter;
+#[derive(Parser)]
+struct Args {
+    /// Input formula in DIMACS CNF format.
+    input_file: std::path::PathBuf,
 
-impl<'a> MakeWriter<'a> for CommentWriter {
-    type Writer = std::io::Stdout;
+    /// Make output more verbose (use multiple times for more verbose output).
+    #[clap(long, short = 'v', parse(from_occurrences))]
+    verbose: u8,
 
-    fn make_writer(&self) -> Self::Writer {
-        let mut writer = std::io::stdout();
-        writer.write_all(b"c ").unwrap();
-        writer
-    }
+    /// Make output less verbose.
+    #[clap(long, short = 'q', parse(from_occurrences), conflicts_with = "verbose")]
+    quiet: u8,
+
+    /// Include originating source locations in log messages.
+    #[clap(long)]
+    log_src: bool,
 }
 
 fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_timer(tracing_subscriber::fmt::time::uptime())
-        .with_level(true)
-        .with_target(true)
-        .with_env_filter(tracing_subscriber::EnvFilter::new(
-            std::env::var("STARLIT_LOG").as_deref().unwrap_or("info"),
-        ))
-        .with_writer(CommentWriter)
-        .init();
-
-    tracing::info!("Starlit SAT Solver");
+    let args = Args::parse();
 
     let start = std::time::Instant::now();
 
-    // Just a temporary hack to easily allow manual testing from the command line.
     let mut solver = starlit::solver::Solver::default();
 
+    match (args.verbose, args.quiet) {
+        (0, 0) => solver.ctx.logger.set_log_level(Some(LogLevel::Info)),
+        (1, _) => solver.ctx.logger.set_log_level(Some(LogLevel::Verbose)),
+        (2, _) => solver.ctx.logger.set_log_level(Some(LogLevel::Debug)),
+        (_, 0) => solver.ctx.logger.set_log_level(Some(LogLevel::Trace)),
+        _ => solver.ctx.logger.set_log_level(None),
+    }
+
+    solver.ctx.logger.log_source_locations(args.log_src);
+
+    info!(solver, "Starlit SAT Solver");
+
     let mut input = flussab_cnf::cnf::Parser::from_read(
-        std::fs::File::open(
-            std::env::args_os()
-                .nth(1)
-                .ok_or_else(|| anyhow::anyhow!("no input formula"))?,
-        )?,
+        std::fs::File::open(&args.input_file)?,
         flussab_cnf::cnf::Config::default(),
     )?;
 
@@ -54,14 +54,8 @@ fn main() -> anyhow::Result<()> {
         .header()
         .ok_or_else(|| anyhow::anyhow!("no header in input file"))?;
 
-    solver.resize(header.var_count);
-
     while let Some(clause) = input.next_clause()? {
-        add_clause_verbatim(
-            &mut solver.search.prop,
-            LongHeader::new_input_clause(),
-            clause,
-        );
+        solver.add_clause(clause);
     }
 
     let satisfiable = solver.solve();
@@ -71,29 +65,48 @@ fn main() -> anyhow::Result<()> {
 
     let duration_secs = duration.as_secs_f64();
 
-    tracing::info!(satisfiable, ?duration);
-    tracing::info!(
-        conflicts = solver.search.stats.conflicts,
-        per_sec = ?solver.search.stats.conflicts as f64 / duration_secs,
+    info!(solver, = satisfiable, = duration);
+    info!(
+        solver,
+        conflicts = solver.state.search.stats.conflicts,
+        per_sec = (solver.state.search.stats.conflicts as f64 / duration_secs),
     );
-    tracing::info!(
-        decisions = solver.search.stats.decisions,
-        per_conflict = ?solver.search.stats.decisions as f64 / solver.search.stats.conflicts as f64,
+    info!(
+        solver,
+        decisions = solver.state.search.stats.decisions,
+        per_conflict =
+            solver.state.search.stats.decisions as f64 / solver.state.search.stats.conflicts as f64,
     );
-    tracing::info!(
-        propagations = solver.search.stats.propagations,
-        per_sec = ?solver.search.stats.propagations as f64 / duration_secs,
+    info!(
+        solver,
+        propagations = solver.state.search.stats.propagations,
+        per_sec = solver.state.search.stats.propagations as f64 / duration_secs,
     );
 
     if satisfiable {
         println!("s SATISFIABLE");
-        print!("v ");
-        for var in (0..header.var_count).map(Var::from_index) {
-            let lit = Lit::from_var(var, true);
-            let negate = solver.search.prop.values.is_false(lit);
-            print!("{} ", lit ^ negate);
+        let mut line = String::default();
+
+        for lit in (0..header.var_count).map(|index| Lit::from_index(index, true)) {
+            if let Some(value) = solver.value(lit) {
+                use std::fmt::Write;
+
+                let len = line.len();
+
+                write!(&mut line, " {}", lit ^ !value).unwrap();
+
+                if line.len() > 77 {
+                    line.truncate(len);
+                    println!("v{}", line);
+                    line.clear();
+                    write!(&mut line, " {}", lit ^ !value).unwrap();
+                }
+            }
         }
-        println!("0");
+        if !line.is_empty() {
+            println!("v{}", line);
+        }
+        println!("v 0");
         std::process::exit(20);
     } else {
         println!("s UNSATISFIABLE");
