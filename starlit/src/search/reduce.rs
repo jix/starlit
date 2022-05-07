@@ -19,6 +19,7 @@ struct Score(
 /// Performs clause database reduction.
 pub fn reduce(ctx: &mut Ctx, search: &mut Search) {
     debug!(ctx, "reduce");
+    ctx.stats.search.reductions += 1;
     protect_clauses(search, true);
 
     let mut deletion_candidates = vec![];
@@ -67,6 +68,7 @@ pub fn reduce(ctx: &mut Ctx, search: &mut Search) {
         let (_lower, _nth, higher) = deletion_candidates.select_nth_unstable(candidate_count / 2);
 
         for &(_, clause) in higher.iter() {
+            ctx.stats.formula.redundant -= 1;
             long_clauses.delete_clause(clause);
         }
     }

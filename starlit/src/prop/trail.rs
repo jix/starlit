@@ -218,6 +218,14 @@ impl Trail {
     pub fn propagated(&self) -> usize {
         self.propagated
     }
+
+    /// Number of toplevel assignments.
+    pub fn fixed_var_count(&self) -> usize {
+        self.decisions
+            .get(1)
+            .map(|&index| index as usize)
+            .unwrap_or(self.steps.len())
+    }
 }
 
 /// Same as [`assign`] but can be called when borrowing other parts of [`Prop`].

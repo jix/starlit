@@ -22,7 +22,6 @@ pub mod watch;
 #[derive(Default)]
 #[allow(missing_docs)]
 pub struct Prop {
-    pub var_count: usize,
     pub unsat: bool,
     pub values: PartialAssignment,
     pub binary: BinaryClauses,
@@ -33,12 +32,37 @@ pub struct Prop {
 
 impl Resize for Prop {
     fn resize(&mut self, var_count: usize) {
-        self.var_count = var_count;
         self.values.resize(var_count);
         self.binary.resize(var_count);
         self.watches.resize(var_count);
         self.trail.resize(var_count);
     }
+}
+
+/// Propagation statistics.
+#[derive(Default)]
+pub struct PropStats {
+    /// Total number of propagated assignments.
+    pub propagations: u64,
+
+    /// Current number of fixed variables.
+    pub fixed_vars: usize,
+}
+
+/// Formula statistics.
+#[derive(Default)]
+pub struct FormulaStats {
+    /// Current number of binary clauses.
+    pub binary: u64,
+
+    /// Current number of irredundant long clauses.
+    pub irredundant: u64,
+
+    /// Current number of redundant long clauses.
+    pub redundant: u64,
+
+    /// Current number of variables.
+    pub vars: usize,
 }
 
 /// Reference to an added binary or long clause.
@@ -58,7 +82,12 @@ pub enum AddedClause {
 /// Add a clause to the formula without simplifying or reordering literals.
 ///
 /// This can break solver invariants.
-pub fn add_clause_verbatim(prop: &mut Prop, header: LongHeader, lits: &[Lit]) -> AddedClause {
+pub fn add_clause_verbatim(
+    ctx: &mut Ctx,
+    prop: &mut Prop,
+    header: LongHeader,
+    lits: &[Lit],
+) -> AddedClause {
     match *lits {
         [] => {
             prop.unsat = true;
@@ -80,10 +109,16 @@ pub fn add_clause_verbatim(prop: &mut Prop, header: LongHeader, lits: &[Lit]) ->
             AddedClause::Unit(a)
         }
         [a, b] => {
+            ctx.stats.formula.binary += 1;
             prop.binary.add_clause([a, b]);
             AddedClause::Binary([a, b])
         }
         [a, b, ..] => {
+            if header.redundant() {
+                ctx.stats.formula.redundant += 1;
+            } else {
+                ctx.stats.formula.irredundant += 1;
+            }
             // TODO handle full clause arena
             let clause = prop.long.add_clause(header, lits).unwrap();
             prop.watches.watch_clause(clause, [a, b]);

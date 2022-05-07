@@ -16,6 +16,7 @@ use crate::{
 use self::{phases::Phases, vsids::Vsids};
 
 mod phases;
+mod reduce;
 mod vsids;
 
 /// CDCL search data structures.
@@ -26,7 +27,6 @@ pub struct Search {
     pub conflict_analysis: ConflictAnalysis,
     pub vsids: Vsids,
     pub phases: Phases,
-    pub stats: SearchStats,
 }
 
 impl Resize for Search {
@@ -44,17 +44,16 @@ pub fn search_step(ctx: &mut Ctx, search: &mut Search) -> Option<bool> {
     }
     collect_garbage(ctx, &mut search.prop);
 
-    let previously_propagated = search.prop.trail.propagated();
-
     // Propagate with the current assignment
-    let prop_result = propagate(&mut search.prop);
-    search.stats.propagations += (search.prop.trail.propagated() - previously_propagated) as u64;
+    let prop_result = propagate(ctx, &mut search.prop);
+
     if let Err(conflict) = prop_result {
-        search.stats.conflicts += 1;
+        ctx.stats.search.conflicts += 1;
         if search.prop.trail.decision_level() == DecisionLevel::TOP {
             search.prop.unsat = true;
             // Conflict without any assumptions means the formula is UNSAT
             verbose!(ctx, "unsatisfiable");
+
             return Some(false);
         }
         // Otherwise we can learn an asserting clause and backtrack to the level where it turns from
@@ -72,7 +71,7 @@ pub fn search_step(ctx: &mut Ctx, search: &mut Search) -> Option<bool> {
     } else if let Some(var) = search.vsids.pop_decision_var(&search.prop.values) {
         // When there was no conflict but not all variables are assigned, make a heuristic
         // decision.
-        search.stats.decisions += 1;
+        ctx.stats.search.decisions += 1;
         let lit = search.phases.decide_phase(var);
         trace!(ctx, decision = lit);
         assign_decision(&mut search.prop, lit);
@@ -111,6 +110,7 @@ impl<'a> ConflictAnalysisCallbacks for Callbacks<'a> {
 /// Performs a restart by backtracking to decision level 0.
 pub fn restart(ctx: &mut Ctx, search: &mut Search) {
     debug!(ctx, "restart");
+    ctx.stats.search.restarts += 1;
 
     if search.prop.trail.decision_level() > DecisionLevel::TOP {
         backtrack_to_level(
@@ -125,6 +125,8 @@ pub fn restart(ctx: &mut Ctx, search: &mut Search) {
     }
 }
 
+pub use reduce::reduce;
+
 /// Statistics for the CDCL search.
 #[derive(Default, Debug)]
 pub struct SearchStats {
@@ -132,6 +134,8 @@ pub struct SearchStats {
     pub decisions: u64,
     /// Total number of conflicts.
     pub conflicts: u64,
-    /// Total number of propagated assignments.
-    pub propagations: u64,
+    /// Total number of restarts.
+    pub restarts: u64,
+    /// Total number of reductions.
+    pub reductions: u64,
 }

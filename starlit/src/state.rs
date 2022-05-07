@@ -1,14 +1,14 @@
 //! Solver state.
 use crate::{
     context::Ctx,
-    search::{restart, search_step, Search},
+    report::report,
+    search::{reduce, restart, search_step, Search},
     tracking::Resize,
 };
 
-use self::{luby::LubySequence, reduce::reduce};
+use self::luby::LubySequence;
 
 mod luby;
-mod reduce;
 
 /// Stores the main state of a [`Solver`][crate::solver::Solver].
 ///
@@ -29,12 +29,13 @@ impl Resize for State {
 /// Performs a scheduled action or one step of CDCL search and returns whether the formula is
 /// satisfiable.
 pub fn schedule_search_step(ctx: &mut Ctx, state: &mut State) -> Option<bool> {
-    if state.schedule.should_restart(&state.search) {
+    if should_restart(ctx, state) {
         restart(ctx, &mut state.search);
     }
 
-    if state.schedule.should_reduce(&state.search) {
+    if should_reduce(ctx, state) {
         reduce(ctx, &mut state.search);
+        report(ctx);
     }
 
     search_step(ctx, &mut state.search)
@@ -50,24 +51,23 @@ pub struct Schedule {
     reductions: u64,
 }
 
-impl Schedule {
-    /// Returns whether the search should restart.
-    fn should_restart(&mut self, search: &Search) -> bool {
-        let restart = search.stats.conflicts >= self.next_restart;
-        if restart {
-            // TODO make scale configurable
-            self.next_restart = search.stats.conflicts + self.restart_schedule.advance() * 512;
-        }
-        restart
+/// Returns whether the search should restart.
+fn should_restart(ctx: &mut Ctx, state: &mut State) -> bool {
+    let restart = ctx.stats.search.conflicts >= state.schedule.next_restart;
+    if restart {
+        // TODO make scale configurable
+        state.schedule.next_restart =
+            ctx.stats.search.conflicts + state.schedule.restart_schedule.advance() * 512;
     }
+    restart
+}
 
-    /// Returns whether the clause database should be reduced.
-    fn should_reduce(&mut self, search: &Search) -> bool {
-        let reduce = search.stats.conflicts >= self.next_reduce;
-        if reduce {
-            self.reductions += 1;
-            self.next_reduce += (2000.0 * (self.reductions as f64).sqrt()) as u64;
-        }
-        reduce
+/// Returns whether the clause database should be reduced.
+fn should_reduce(ctx: &mut Ctx, state: &mut State) -> bool {
+    let reduce = ctx.stats.search.conflicts >= state.schedule.next_reduce;
+    if reduce {
+        state.schedule.reductions += 1;
+        state.schedule.next_reduce += (2000.0 * (state.schedule.reductions as f64).sqrt()) as u64;
     }
+    reduce
 }

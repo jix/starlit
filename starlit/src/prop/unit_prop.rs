@@ -4,21 +4,31 @@
 //! process of repeatedly extending the current partial assignment by all literals propagated by
 //! clauses that are unit under the current assignment until none are left or until a clause is in
 //! conflict.
-use crate::{lit::Lit, util::mut_scan::MutScan};
+use crate::{context::Ctx, lit::Lit, util::mut_scan::MutScan};
 
 use super::{
-    trail::{self, Reason, Step},
+    trail::{self, DecisionLevel, Reason, Step},
     watch::enable_watch_lists,
     ConflictClause, Prop,
 };
 
 /// Performs unit propagation.
-pub fn propagate(prop: &mut Prop) -> Result<(), ConflictClause> {
+pub fn propagate(ctx: &mut Ctx, prop: &mut Prop) -> Result<(), ConflictClause> {
     enable_watch_lists(prop, true);
+
+    let previously_propagated = prop.trail.propagated();
 
     while let Some(lit) = prop.trail.next_unpropagated_lit() {
         propagate_literal(prop, lit)?;
         prop.trail.advance_propagated();
+    }
+
+    let newly_propagated = prop.trail.propagated() - previously_propagated;
+
+    ctx.stats.prop.propagations += newly_propagated as u64;
+
+    if prop.trail.decision_level() == DecisionLevel::TOP {
+        ctx.stats.prop.fixed_vars = prop.trail.fixed_var_count();
     }
 
     Ok(())
@@ -224,11 +234,12 @@ mod tests {
     }
 
     macro_rules! clauses {
-        ($var_count:literal vars $($($lit:literal),+);* $(;)?) => {{
+        ($ctx:expr, $var_count:literal vars $($($lit:literal),+);* $(;)?) => {{
             let mut prop = Prop::default();
             prop.resize($var_count);
             $(
                 add_clause_verbatim(
+                    &mut $ctx,
                     &mut prop,
                     LongHeader::new_input_clause(),
                     &[$(Lit::from_dimacs($lit)),*],
@@ -261,7 +272,8 @@ mod tests {
 
     #[test]
     fn simple_prop() {
-        let mut prop = clauses![4 vars
+        let mut ctx = Ctx::default();
+        let mut prop = clauses![ctx, 4 vars
             -1, 2;
             -2, 3;
             -2, -3, -4;
@@ -269,13 +281,14 @@ mod tests {
 
         assign_unit!(prop, 1);
 
-        assert!(propagate(&mut prop).is_ok());
+        assert!(propagate(&mut ctx, &mut prop).is_ok());
         assert_assigned!(prop, 1, 2, 3, -4);
     }
 
     #[test]
     fn two_step_prop() {
-        let mut prop = clauses![7 vars
+        let mut ctx = Ctx::default();
+        let mut prop = clauses![ctx, 7 vars
             -1, 2;
             -2, 3;
             -2, -3, -4, -5, -6, -7;
@@ -284,24 +297,25 @@ mod tests {
         ];
 
         assign_unit!(prop, 1);
-        assert!(propagate(&mut prop).is_ok());
+        assert!(propagate(&mut ctx, &mut prop).is_ok());
         assert_assigned!(prop, 1, 2, 3);
 
         assign_unit!(prop, 4);
-        assert!(propagate(&mut prop).is_ok());
+        assert!(propagate(&mut ctx, &mut prop).is_ok());
         assert_assigned!(prop, 1, 2, 3, 4, 5, 6, -7);
     }
 
     #[test]
     fn binary_conflict() {
-        let mut prop = clauses![3 vars
+        let mut ctx = Ctx::default();
+        let mut prop = clauses![ctx, 3 vars
             -1, 2;
             -1, 3;
             -2, -3;
         ];
 
         assign_unit!(prop, 1);
-        match propagate(&mut prop) {
+        match propagate(&mut ctx, &mut prop) {
             Err(ConflictClause::Binary(mut binary)) => {
                 binary.sort();
                 assert_eq!(binary, clause![-2, -3]);
@@ -312,7 +326,8 @@ mod tests {
 
     #[test]
     fn long_conflict() {
-        let mut prop = clauses![8 vars
+        let mut ctx = Ctx::default();
+        let mut prop = clauses![ctx, 8 vars
             -1, 2;
             -1, 3;
             -2, -3, 4;
@@ -323,10 +338,10 @@ mod tests {
         ];
 
         assign_unit!(prop, 1);
-        assert!(propagate(&mut prop).is_ok());
+        assert!(propagate(&mut ctx, &mut prop).is_ok());
 
         assign_unit!(prop, 6);
-        match propagate(&mut prop) {
+        match propagate(&mut ctx, &mut prop) {
             Err(ConflictClause::Long(clause)) => {
                 let mut conflict_lits = prop.long.lits(clause).to_vec();
                 conflict_lits.sort();

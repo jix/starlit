@@ -4,6 +4,7 @@ use crate::{
     lit::Lit,
     log::HasLogger,
     prop::{add_clause_verbatim, long::LongHeader},
+    report::report,
     state::{schedule_search_step, State},
     tracking::Resize,
 };
@@ -26,11 +27,14 @@ impl Solver {
             .map(|lit| lit.index() + 1)
             .max()
             .unwrap_or_default();
-        if self.state.search.prop.var_count < var_count {
+
+        if self.ctx.stats.formula.vars < var_count {
+            self.ctx.stats.formula.vars = var_count;
             self.state.resize(var_count);
         }
 
         add_clause_verbatim(
+            &mut self.ctx,
             &mut self.state.search.prop,
             LongHeader::new_input_clause(),
             clause,
@@ -41,6 +45,7 @@ impl Solver {
     pub fn solve(&mut self) -> bool {
         loop {
             if let Some(result) = schedule_search_step(&mut self.ctx, &mut self.state) {
+                report(&mut self.ctx);
                 return result;
             }
         }
@@ -48,7 +53,7 @@ impl Solver {
 
     /// Returns the value assigned to a literal.
     pub fn value(&self, lit: Lit) -> Option<bool> {
-        if lit.index() < self.state.search.prop.var_count {
+        if lit.index() < self.ctx.stats.formula.vars {
             self.state.search.prop.values.value(lit)
         } else {
             None

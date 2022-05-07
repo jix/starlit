@@ -68,19 +68,19 @@ fn main() -> anyhow::Result<()> {
     info!(solver, = satisfiable, = duration);
     info!(
         solver,
-        conflicts = solver.state.search.stats.conflicts,
-        per_sec = (solver.state.search.stats.conflicts as f64 / duration_secs),
+        conflicts = solver.ctx.stats.search.conflicts,
+        per_sec = (solver.ctx.stats.search.conflicts as f64 / duration_secs),
     );
     info!(
         solver,
-        decisions = solver.state.search.stats.decisions,
+        decisions = solver.ctx.stats.search.decisions,
         per_conflict =
-            solver.state.search.stats.decisions as f64 / solver.state.search.stats.conflicts as f64,
+            solver.ctx.stats.search.decisions as f64 / solver.ctx.stats.search.conflicts as f64,
     );
     info!(
         solver,
-        propagations = solver.state.search.stats.propagations,
-        per_sec = solver.state.search.stats.propagations as f64 / duration_secs,
+        propagations = solver.ctx.stats.prop.propagations,
+        per_sec = solver.ctx.stats.prop.propagations as f64 / duration_secs,
     );
 
     if satisfiable {

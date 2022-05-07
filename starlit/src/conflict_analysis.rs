@@ -100,7 +100,7 @@ pub fn analyze_conflict(
 
     backtrack_to_level(ctx, prop, backtrack_level, callbacks);
 
-    learn_and_assign(analysis, prop);
+    learn_and_assign(ctx, analysis, prop);
 }
 
 /// Derives the 1-UIP clause from the implication graph and the given conflict.
@@ -280,7 +280,7 @@ fn minimize_derived_clause(analysis: &mut ConflictAnalysis, prop: &mut Prop) -> 
 }
 
 /// Adds the derived clause to the current formula and assign the newly asserted literal.
-fn learn_and_assign(analysis: &mut ConflictAnalysis, prop: &mut Prop) {
+fn learn_and_assign(ctx: &mut Ctx, analysis: &mut ConflictAnalysis, prop: &mut Prop) {
     #[cfg(debug_assertions)]
     for &lit in &analysis.derived_clause[1..] {
         debug_assert!(prop.values.is_false(lit));
@@ -298,7 +298,7 @@ fn learn_and_assign(analysis: &mut ConflictAnalysis, prop: &mut Prop) {
 
     // TODO add and use a clause addition function that handles propagation
 
-    let reason = match add_clause_verbatim(prop, header, &analysis.derived_clause) {
+    let reason = match add_clause_verbatim(ctx, prop, header, &analysis.derived_clause) {
         crate::prop::AddedClause::Empty => None,
         crate::prop::AddedClause::Unit(_) => None,
         crate::prop::AddedClause::Binary([_, b]) => Some(Reason::Binary(b)),
@@ -334,11 +334,12 @@ mod tests {
     }
 
     macro_rules! clauses {
-        ($var_count:literal vars $($($lit:literal),+);* $(;)?) => {{
+        ($ctx:expr, $var_count:literal vars $($($lit:literal),+);* $(;)?) => {{
             let mut prop = Prop::default();
             prop.resize($var_count);
             $(
                 add_clause_verbatim(
+                    &mut $ctx,
                     &mut prop,
                     LongHeader::new_input_clause(),
                     &[$(Lit::from_dimacs($lit)),*],
@@ -349,7 +350,8 @@ mod tests {
     }
     #[test]
     fn unit_clause() {
-        let mut prop = clauses![4 vars
+        let mut ctx = Ctx::default();
+        let mut prop = clauses![ctx, 4 vars
             -1, 2;
             -1, 3;
             -2, -3;
@@ -359,13 +361,13 @@ mod tests {
 
         assign_decision(&mut prop, Lit::from_dimacs(4));
 
-        let conflict = propagate(&mut prop).unwrap_err();
+        let conflict = propagate(&mut ctx, &mut prop).unwrap_err();
 
-        analyze_conflict(&mut Ctx::default(), &mut data, &mut prop, conflict, &mut ());
+        analyze_conflict(&mut ctx, &mut data, &mut prop, conflict, &mut ());
 
         assert_eq!(data.derived_clause, &clause![-1]);
 
-        propagate(&mut prop).unwrap();
+        propagate(&mut ctx, &mut prop).unwrap();
 
         assert!(prop.values.is_true(Lit::from_dimacs(-1)));
         assert_eq!(
@@ -377,7 +379,8 @@ mod tests {
 
     #[test]
     fn long_clause() {
-        let mut prop = clauses![7 vars
+        let mut ctx = Ctx::default();
+        let mut prop = clauses![ctx, 7 vars
             -1, 2;
             -1, 3;
             -2, -3, -4, -5;
@@ -389,15 +392,15 @@ mod tests {
 
         assign_decision(&mut prop, Lit::from_dimacs(1));
 
-        propagate(&mut prop).unwrap();
+        propagate(&mut ctx, &mut prop).unwrap();
 
         assign_decision(&mut prop, Lit::from_dimacs(6));
 
-        let conflict = propagate(&mut prop).unwrap_err();
+        let conflict = propagate(&mut ctx, &mut prop).unwrap_err();
 
-        analyze_conflict(&mut Ctx::default(), &mut data, &mut prop, conflict, &mut ());
+        analyze_conflict(&mut ctx, &mut data, &mut prop, conflict, &mut ());
 
-        propagate(&mut prop).ok().unwrap();
+        propagate(&mut ctx, &mut prop).ok().unwrap();
 
         assert!(prop.values.is_true(Lit::from_dimacs(-7)));
         if let Reason::Long(clause) = prop.trail.step_for_var(Var::from_dimacs(7)).reason {
@@ -412,7 +415,8 @@ mod tests {
 
     #[test]
     fn binary_clause() {
-        let mut prop = clauses![7 vars
+        let mut ctx = Ctx::default();
+        let mut prop = clauses![ctx, 7 vars
             -1, 2;
             -1, 3;
             -2, -4, -5;
@@ -424,15 +428,15 @@ mod tests {
 
         assign_decision(&mut prop, Lit::from_dimacs(1));
 
-        propagate(&mut prop).unwrap();
+        propagate(&mut ctx, &mut prop).unwrap();
 
         assign_decision(&mut prop, Lit::from_dimacs(6));
 
-        let conflict = propagate(&mut prop).unwrap_err();
+        let conflict = propagate(&mut ctx, &mut prop).unwrap_err();
 
-        analyze_conflict(&mut Ctx::default(), &mut data, &mut prop, conflict, &mut ());
+        analyze_conflict(&mut ctx, &mut data, &mut prop, conflict, &mut ());
 
-        propagate(&mut prop).ok().unwrap();
+        propagate(&mut ctx, &mut prop).ok().unwrap();
 
         assert!(prop.values.is_true(Lit::from_dimacs(-7)));
         assert_eq!(

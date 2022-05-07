@@ -1,5 +1,8 @@
 //! Solver context (logging, etc.).
-use crate::log::{HasLogger, Logger};
+use crate::{
+    log::{HasLogger, Logger},
+    stats::Stats,
+};
 
 /// Solver context.
 ///
@@ -8,6 +11,7 @@ use crate::log::{HasLogger, Logger};
 #[allow(missing_docs)]
 pub struct Ctx {
     pub logger: Logger,
+    pub stats: Stats,
 }
 
 impl HasLogger for Ctx {
