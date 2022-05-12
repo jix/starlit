@@ -3,6 +3,7 @@ use crate::{
     context::Ctx,
     lit::Lit,
     log::HasLogger,
+    proof::Proof,
     prop::{add_clause_verbatim, long::LongHeader},
     report::report,
     state::{schedule_search_step, State},
@@ -12,12 +13,12 @@ use crate::{
 /// A complete SAT solver.
 #[derive(Default)]
 #[allow(missing_docs)]
-pub struct Solver {
-    pub ctx: Ctx,
+pub struct Solver<'a> {
+    pub ctx: Ctx<'a>,
     pub state: State,
 }
 
-impl Solver {
+impl<'a> Solver<'a> {
     /// Adds a clause to the current formula.
     pub fn add_clause(&mut self, clause: &[Lit]) {
         // TODO this is just a temporary hack
@@ -41,6 +42,21 @@ impl Solver {
         );
     }
 
+    /// Starts writing a proof using the provider writer.
+    pub fn write_proof(&mut self, proof: Box<dyn Proof + 'a>) {
+        self.ctx.proof = Some(proof)
+    }
+
+    /// Flushes the current proof writer and stop writing to it.
+    ///
+    /// Does nothing if no proof writer is currently active.
+    pub fn close_proof(&mut self) -> std::io::Result<()> {
+        if let Some(mut proof) = self.ctx.proof.take() {
+            proof.flush()?;
+        }
+        Ok(())
+    }
+
     /// Determines whether the current formula is satisfiable.
     pub fn solve(&mut self) -> bool {
         loop {
@@ -61,7 +77,7 @@ impl Solver {
     }
 }
 
-impl HasLogger for Solver {
+impl HasLogger for Solver<'_> {
     #[inline(always)]
     fn logger(&self) -> &crate::log::Logger {
         self.ctx.logger()

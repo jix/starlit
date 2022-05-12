@@ -16,5 +16,6 @@ doc = false
 anyhow = "1.0.56"
 clap = { version = "3.1.14", features = ["derive"] }
 flussab-cnf = "0.3.0"
+flussab = "0.3.0"
 mimalloc = { version = "0.1.28", default-features = false }
 starlit = { version = "0.1.0", path = "../starlit" }

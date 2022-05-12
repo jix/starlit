@@ -8,5 +8,6 @@ license = "0BSD"
 
 [dependencies]
 flussab-cnf = "0.3.0"
+flussab = "0.3.0"
 
 starlit-macros = { version = "0.1.0", path = "../starlit-macros" }

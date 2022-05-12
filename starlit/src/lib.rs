@@ -17,6 +17,7 @@ pub mod lit;
 pub mod log;
 pub mod minimize;
 pub mod partial_assignment;
+pub mod proof;
 pub mod prop;
 pub mod report;
 pub mod search;

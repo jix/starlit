@@ -1,8 +1,10 @@
 use clap::Parser;
+use flussab::DeferredWriter;
 use mimalloc::MiMalloc;
 use starlit::{
     lit::Lit,
     log::{info, LogLevel},
+    proof::drat::Drat,
 };
 
 #[global_allocator]
@@ -12,6 +14,11 @@ static GLOBAL: MiMalloc = MiMalloc;
 struct Args {
     /// Input formula in DIMACS CNF format.
     input_file: std::path::PathBuf,
+
+    /// Optional proof output in DRAT format.
+    ///
+    /// Will not overwrite an existing file.
+    proof_file: Option<std::path::PathBuf>,
 
     /// Make output more verbose (use multiple times for more verbose output).
     #[clap(long, short = 'v', parse(from_occurrences))]
@@ -44,6 +51,15 @@ fn main() -> anyhow::Result<()> {
     solver.ctx.logger.log_source_locations(args.log_src);
 
     info!(solver, "Starlit SAT Solver");
+
+    if let Some(proof_file) = args.proof_file {
+        solver.write_proof(Box::new(Drat::new(DeferredWriter::from_write(
+            std::fs::File::options()
+                .write(true)
+                .create_new(true)
+                .open(proof_file)?,
+        ))));
+    }
 
     let mut input = flussab_cnf::cnf::Parser::from_read(
         std::fs::File::open(&args.input_file)?,
@@ -82,6 +98,8 @@ fn main() -> anyhow::Result<()> {
         propagations = solver.ctx.stats.prop.propagations,
         per_sec = solver.ctx.stats.prop.propagations as f64 / duration_secs,
     );
+
+    solver.close_proof()?;
 
     if satisfiable {
         println!("s SATISFIABLE");

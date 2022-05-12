@@ -296,6 +296,10 @@ fn learn_and_assign(ctx: &mut Ctx, analysis: &mut ConflictAnalysis, prop: &mut P
         ));
     }
 
+    if let Some(proof) = &mut ctx.proof {
+        proof.add_clause(&analysis.derived_clause)
+    }
+
     // TODO add and use a clause addition function that handles propagation
 
     let reason = match add_clause_verbatim(ctx, prop, header, &analysis.derived_clause) {

@@ -69,6 +69,11 @@ pub fn reduce(ctx: &mut Ctx, search: &mut Search) {
 
         for &(_, clause) in higher.iter() {
             ctx.stats.formula.redundant -= 1;
+
+            if let Some(proof) = &mut ctx.proof {
+                proof.delete_clause(long_clauses.lits(clause));
+            }
+
             long_clauses.delete_clause(clause);
         }
     }
