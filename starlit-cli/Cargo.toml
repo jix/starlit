@@ -10,6 +10,7 @@ license = "0BSD"
 [[bin]]
 name = "starlit"
 path = "src/main.rs"
+doc = false
 
 [dependencies]
 anyhow = "1.0.56"
