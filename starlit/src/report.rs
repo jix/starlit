@@ -6,7 +6,10 @@ use crate::{context::Ctx, log::LogLevel};
 #[track_caller]
 pub fn report(ctx: &mut Ctx) {
     let stats = &ctx.stats;
+    let time = ctx.logger.time();
+    let time = time.as_millis() / 10;
     ctx.logger.log(LogLevel::Info, |msg| {
+        msg.add_value(&format_args!("{}.{:02}", time / 100, time % 100));
         msg.add_message("red:");
         msg.add_value(&format_args!("{:2}", stats.search.reductions));
         msg.add_message("res:");

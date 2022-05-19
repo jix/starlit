@@ -46,8 +46,6 @@ enum ProofFormat {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    let start = std::time::Instant::now();
-
     let mut solver = starlit::solver::Solver::default();
 
     match (args.verbose, args.quiet) {
@@ -91,8 +89,7 @@ fn main() -> anyhow::Result<()> {
 
     let satisfiable = solver.solve();
 
-    let end = std::time::Instant::now();
-    let duration = end - start;
+    let duration = solver.ctx.logger.time();
 
     let duration_secs = duration.as_secs_f64();
 

@@ -1,5 +1,10 @@
 //! Solver internal logging.
-use std::{fmt::Debug, io::Write, panic::Location};
+use std::{
+    fmt::Debug,
+    io::Write,
+    panic::Location,
+    time::{Duration, Instant},
+};
 
 /// Log levels used for solver internal logging.
 ///
@@ -19,10 +24,20 @@ pub enum LogLevel {
 pub use starlit_macros::{debug, info, trace, verbose};
 
 /// Solver internal logger.
-#[derive(Default)]
 pub struct Logger {
     level_limit: u8,
     log_source_locations: bool,
+    startup: Instant,
+}
+
+impl Default for Logger {
+    fn default() -> Self {
+        Self {
+            level_limit: Default::default(),
+            log_source_locations: Default::default(),
+            startup: Instant::now(),
+        }
+    }
 }
 
 impl Logger {
@@ -50,6 +65,11 @@ impl Logger {
         if (level as u8) < self.level_limit {
             self.perform_log(level, Location::caller(), action)
         }
+    }
+
+    /// Returns the time passed since the start of logging.
+    pub fn time(&self) -> Duration {
+        Instant::now() - self.startup
     }
 
     #[inline(never)]
