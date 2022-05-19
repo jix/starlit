@@ -1,10 +1,10 @@
-use clap::Parser;
+use clap::{ArgEnum, Parser};
 use flussab::DeferredWriter;
 use mimalloc::MiMalloc;
 use starlit::{
     lit::Lit,
     log::{info, LogLevel},
-    proof::drat::Drat,
+    proof::drat::{BinaryDrat, Drat},
 };
 
 #[global_allocator]
@@ -20,6 +20,10 @@ struct Args {
     /// Will not overwrite an existing file.
     proof_file: Option<std::path::PathBuf>,
 
+    /// Proof format to generate.
+    #[clap(long, arg_enum, default_value = "binary-drat")]
+    proof_format: ProofFormat,
+
     /// Make output more verbose (use multiple times for more verbose output).
     #[clap(long, short = 'v', parse(from_occurrences))]
     verbose: u8,
@@ -31,6 +35,12 @@ struct Args {
     /// Include originating source locations in log messages.
     #[clap(long)]
     log_src: bool,
+}
+
+#[derive(Copy, Clone, ArgEnum, Debug)]
+enum ProofFormat {
+    Drat,
+    BinaryDrat,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -53,12 +63,17 @@ fn main() -> anyhow::Result<()> {
     info!(solver, "Starlit SAT Solver");
 
     if let Some(proof_file) = args.proof_file {
-        solver.write_proof(Box::new(Drat::new(DeferredWriter::from_write(
+        let proof_writer = DeferredWriter::from_write(
             std::fs::File::options()
                 .write(true)
                 .create_new(true)
                 .open(proof_file)?,
-        ))));
+        );
+
+        solver.write_proof(match args.proof_format {
+            ProofFormat::Drat => Box::new(Drat::new(proof_writer)),
+            ProofFormat::BinaryDrat => Box::new(BinaryDrat::new(proof_writer)),
+        });
     }
 
     let mut input = flussab_cnf::cnf::Parser::from_read(
